@@ -104,19 +104,19 @@ typedef coord point[3];
 #include <stdio.h>
 #include <stdlib.h>
 
-static void dump_coord(const char *label, const coord c)
+/*static void dump_coord(const char *label, const coord c)
 {
     if (label) fprintf(stderr, "%s: ", label);
     printf("%016lx %016lx %016lx\n", c[2], c[1], c[0]);
-}
+}*/
 
-static void dump_point(const char *label, point p)
+/*static void dump_point(const char *label, point p)
 {
     if (label) fprintf(stderr, "%s:\n", label);
     dump_coord(" x", p[0]);
     dump_coord(" y", p[1]);
     dump_coord(" z", p[2]);
-}
+}*/
 
 /* Field element represented as a byte arrary.
  * 21*8 = 168 bits is also the group order size for the elliptic curve.  */
@@ -841,7 +841,7 @@ static void point_add(fslice x3[3], fslice y3[3], fslice z3[3],
 	select_conditional(z3, zout, z1, 3, z2_is_zero);
 	}
 
-static void affine(point P)
+/*static void affine(point P)
 {
     coord z1, z2, xin, yin;
     uint128_t tmp[7];
@@ -856,7 +856,7 @@ static void affine(point P)
     felem_contract(P[1], yin);
     memset(P[2], 0, sizeof(coord));
     P[2][0] = 1;
-}
+}*/
 
 static void affine_x(coord out, point P)
 {

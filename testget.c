@@ -29,13 +29,13 @@ typedef struct {
 
 int tag_flow(SSL *s){
 	unsigned char *result;
-	int len, i;
+	int len;
 
 	result = s->s3->client_random;
 	len = sizeof(s->s3->client_random);
 
-	if(len > PTWIST_TAG_BYTES) {
-		printf("Uhoh");
+	if(len < PTWIST_TAG_BYTES) {
+		printf("Uhoh\n");
 		return 1;
 	}
 	tag_hello((byte *) result);
@@ -93,11 +93,11 @@ connection *sslConnect (void)
       // Register the available ciphers and digests
       SSL_library_init();
 
-      // New context saying we are a client, and using SSL 2 or 3
-      c->sslContext = SSL_CTX_new (SSLv23_client_method ());
+      // New context saying we are a client, and using TLSv1.2
+      c->sslContext = SSL_CTX_new (TLSv1_2_method());
 
 	  //Tag the client hello message with Telex tag
-	  SSL_CTX_set_client_hello_callback(c->sslContext, tag_hello);
+	  SSL_CTX_set_client_hello_callback(c->sslContext, tag_flow);
       if (c->sslContext == NULL)
         ERR_print_errors_fp (stderr);
 

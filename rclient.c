@@ -126,8 +126,9 @@ static void gen_tag(byte *tag, byte key[16],
 int tag_hello(unsigned char *target)
 {
     FILE *fp;
-    int res;
+    int res, i;
     byte *tag;
+	char output[PTWIST_TAG_BYTES+1];
 
     /* Create the generators */
     memset(maingen, 0, PTWIST_BYTES);
@@ -156,6 +157,16 @@ int tag_hello(unsigned char *target)
 	tag = target;
 
 	gen_tag(tag, key, (const byte *)"context", 7);
+    fp = fopen("tags", "wb");
+    if (fp == NULL) {
+		perror("fopen");
+		exit(1);
+    }
+	for(i=0; i< PTWIST_TAG_BYTES; i++){
+		fprintf(fp, "%02x ", tag[i]);
+	}
+	printf("\n");
+	fclose(fp);
 
     return 0;
 }
