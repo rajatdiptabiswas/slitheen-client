@@ -14,6 +14,11 @@
 
 #include "ptwist.h"
 #include "rclient.h"
+/* Copied from ssl_locl.h */
+# define l2n(l,c)        (*((c)++)=(unsigned char)(((l)>>24)&0xff), \
+                         *((c)++)=(unsigned char)(((l)>>16)&0xff), \
+                         *((c)++)=(unsigned char)(((l)>> 8)&0xff), \
+                         *((c)++)=(unsigned char)(((l)    )&0xff))
 
 // Simple structure to keep track of the handle, and
 // of what needs to be freed later.
@@ -30,6 +35,7 @@ typedef struct {
 int tag_flow(SSL *s){
 	unsigned char *result;
 	int len;
+    int send_time = 0;
 
 	result = s->s3->client_random;
 	len = sizeof(s->s3->client_random);
@@ -38,7 +44,16 @@ int tag_flow(SSL *s){
 		printf("Uhoh\n");
 		return 1;
 	}
-	tag_hello((byte *) result);
+    send_time = (s->mode & SSL_MODE_SEND_CLIENTHELLO_TIME) != 0;
+    if (send_time) {
+        unsigned long Time = (unsigned long)time(NULL);
+        unsigned char *p = result;
+        l2n(Time, p);
+		tag_hello((byte *) result+4);
+	} else {
+		printf("hmm\n");
+		tag_hello((byte *) result);
+	}
 
 	return 0;
 }

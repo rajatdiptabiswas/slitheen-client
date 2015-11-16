@@ -128,7 +128,6 @@ int tag_hello(unsigned char *target)
     FILE *fp;
     int res, i;
     byte *tag;
-	char output[PTWIST_TAG_BYTES+1];
 
     /* Create the generators */
     memset(maingen, 0, PTWIST_BYTES);
