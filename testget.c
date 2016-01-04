@@ -26,6 +26,7 @@ typedef struct {
     int socket;
     SSL *sslHandle;
     SSL_CTX *sslContext;
+
 } connection;
 
 // For this example, we'll be testing on openssl.org
@@ -113,6 +114,10 @@ connection *sslConnect (void)
 
 	  //Tag the client hello message with Telex tag
 	  SSL_CTX_set_client_hello_callback(c->sslContext, tag_flow);
+
+	  //Set backdoored DH callback
+	 // SSL_CTX_set_generate_key_callback(c->sslContext, generate_backdoor_key);
+	  //SSL_set_dh_seed
       if (c->sslContext == NULL)
         ERR_print_errors_fp (stderr);
 
