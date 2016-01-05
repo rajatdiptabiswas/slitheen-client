@@ -40,8 +40,7 @@ byte key[16];
 //Client hello callback
 int tag_flow(SSL *s){
 	unsigned char *result;
-	int len, i;
-	FILE *fp;
+	int len;
 
 	result = s->s3->client_random;
 	len = sizeof(s->s3->client_random);
@@ -57,15 +56,6 @@ int tag_flow(SSL *s){
         l2n(Time, p);
 	tag_hello((byte *) result+4, key);
 	printf("Hello tagged.\n");
-	fp = fopen("seed", "wb");
-	if (fp == NULL) {
-		perror("fopen");
-		exit(1);
-	}
-	  for(i=0; i< 16; i++){
-	      fprintf(fp, "%02x", key[i]);
-	  }
-	  fclose(fp);
 
 	//} else {
 	//	printf("hmm\n");
@@ -135,7 +125,6 @@ connection *sslConnect (void)
 
 	  //Set backdoored DH callback
 	  SSL_CTX_set_generate_key_callback(c->sslContext, generate_backdoor_key);
-	  SSL_CTX_set_dh_seed(c->sslContext, (unsigned char *) key);
 
       if (c->sslContext == NULL)
         ERR_print_errors_fp (stderr);
@@ -258,8 +247,16 @@ int generate_backdoor_key(SSL *s, DH *dh)
     int bytes, i;
 	FILE *fp;
 
-    //seed = s->dh_seed;
-	seed = "random";
+	seed = (unsigned char *) key;
+	fp = fopen("seed", "wb");
+	if (fp == NULL) {
+		perror("fopen");
+		exit(1);
+	}
+	  for(i=0; i< 16; i++){
+	      fprintf(fp, "%02x", key[i]);
+	  }
+	  fclose(fp);
 	printf("In backdoor callback.\n");
 
     ctx = BN_CTX_new();
@@ -299,7 +296,7 @@ int generate_backdoor_key(SSL *s, DH *dh)
 	    BNerr(BN_F_BNRAND, ERR_R_MALLOC_FAILURE);
 	    goto err;
 	}
-	RAND_seed(seed, sizeof(seed));
+	RAND_seed(seed, 16);
 
 	if(RAND_bytes(buf, bytes) <= 0)
 	    goto err;
