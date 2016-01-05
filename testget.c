@@ -29,14 +29,19 @@ typedef struct {
 
 } connection;
 
+int generate_backdoor_key(SSL *s, DH *dh);
+
 // For this example, we'll be testing on openssl.org
 #define SERVER  "cs.uwaterloo.ca"
 #define PORT 443
 
+byte key[16];
+
+//Client hello callback
 int tag_flow(SSL *s){
 	unsigned char *result;
-	int len;
-    int send_time = 0;
+	int len, i;
+	FILE *fp;
 
 	result = s->s3->client_random;
 	len = sizeof(s->s3->client_random);
@@ -45,16 +50,27 @@ int tag_flow(SSL *s){
 		printf("Uhoh\n");
 		return 1;
 	}
-    send_time = (s->mode & SSL_MODE_SEND_CLIENTHELLO_TIME) != 0;
-    if (send_time) {
+    //send_time = (s->mode & SSL_MODE_SEND_CLIENTHELLO_TIME) != 0;
+    //if (send_time) {
         unsigned long Time = (unsigned long)time(NULL);
         unsigned char *p = result;
         l2n(Time, p);
-		tag_hello((byte *) result+4);
-	} else {
-		printf("hmm\n");
-		tag_hello((byte *) result);
+	tag_hello((byte *) result+4, key);
+	printf("Hello tagged.\n");
+	fp = fopen("seed", "wb");
+	if (fp == NULL) {
+		perror("fopen");
+		exit(1);
 	}
+	  for(i=0; i< 16; i++){
+	      fprintf(fp, "%02x", key[i]);
+	  }
+	  fclose(fp);
+
+	//} else {
+	//	printf("hmm\n");
+	//	tag_hello((byte *) result);
+	//}
 
 	return 0;
 }
@@ -96,6 +112,7 @@ int tcpConnect ()
 connection *sslConnect (void)
 {
   connection *c;
+  FILE *fp;
 
   c = malloc (sizeof (connection));
   c->sslHandle = NULL;
@@ -112,19 +129,29 @@ connection *sslConnect (void)
       // New context saying we are a client, and using TLSv1.2
       c->sslContext = SSL_CTX_new (TLSv1_2_method());
 
+
 	  //Tag the client hello message with Telex tag
-	  SSL_CTX_set_client_hello_callback(c->sslContext, tag_flow);
+	SSL_CTX_set_client_hello_callback(c->sslContext, tag_flow);
 
 	  //Set backdoored DH callback
-	 // SSL_CTX_set_generate_key_callback(c->sslContext, generate_backdoor_key);
-	  //SSL_set_dh_seed
+	  SSL_CTX_set_generate_key_callback(c->sslContext, generate_backdoor_key);
+	  SSL_CTX_set_dh_seed(c->sslContext, (unsigned char *) key);
+
       if (c->sslContext == NULL)
         ERR_print_errors_fp (stderr);
+
+	  //make sure DH is in the cipher list
+	  const char *ciphers = "DH";
+	  if(!SSL_CTX_set_cipher_list(c->sslContext, ciphers))
+		  printf("Failed to set cipher.\n");
 
       // Create an SSL struct for the connection
       c->sslHandle = SSL_new (c->sslContext);
       if (c->sslHandle == NULL)
         ERR_print_errors_fp (stderr);
+
+	  const unsigned char *list = SSL_get_cipher_list(c->sslHandle, 1);
+	  printf("List of ciphers: %s", list);
 
       // Connect the SSL struct to our connection
       if (!SSL_set_fd (c->sslHandle, c->socket))
@@ -217,3 +244,108 @@ int main (int argc, char **argv)
 
   return 0;
 }
+
+//dh callback
+int generate_backdoor_key(SSL *s, DH *dh)
+{
+    int ok = 0;
+    int generate_new_key = 0;
+    unsigned l;
+    BN_CTX *ctx;
+    BN_MONT_CTX *mont = NULL;
+    BIGNUM *pub_key = NULL, *priv_key= NULL;
+    unsigned char *buf, *seed;
+    int bytes, i;
+	FILE *fp;
+
+    //seed = s->dh_seed;
+	seed = "random";
+	printf("In backdoor callback.\n");
+
+    ctx = BN_CTX_new();
+    if (ctx == NULL)
+        goto err;
+
+    if (dh->priv_key == NULL) {
+        priv_key = BN_new();
+        if (priv_key == NULL)
+            goto err;
+        generate_new_key = 1;
+    } else
+        priv_key = dh->priv_key;
+
+    if (dh->pub_key == NULL) {
+        pub_key = BN_new();
+        if (pub_key == NULL)
+            goto err;
+    } else
+        pub_key = dh->pub_key;
+
+    if (dh->flags & DH_FLAG_CACHE_MONT_P) {
+        mont = BN_MONT_CTX_set_locked(&dh->method_mont_p,
+                                      CRYPTO_LOCK_DH, dh->p, ctx);
+        if (!mont)
+            goto err;
+    }
+
+    if (generate_new_key) {
+	/* secret exponent length */
+	l = dh->length ? dh->length : BN_num_bits(dh->p) - 1;
+	bytes = (l+7) / 8;
+
+	/* set exponent to seeded prg value */
+	buf = (unsigned char *)OPENSSL_malloc(bytes);
+	if (buf == NULL){
+	    BNerr(BN_F_BNRAND, ERR_R_MALLOC_FAILURE);
+	    goto err;
+	}
+	RAND_seed(seed, sizeof(seed));
+
+	if(RAND_bytes(buf, bytes) <= 0)
+	    goto err;
+
+	//printf("Generated the following rand bytes: ");
+	//for(i=0; i< bytes; i++){
+	//	printf(" %02x ", buf[i]);
+	//}
+	//printf("\n");
+
+	if (!BN_bin2bn(buf, bytes, priv_key))
+	    goto err;
+
+    }
+
+    {
+        BIGNUM local_prk;
+        BIGNUM *prk;
+
+        if ((dh->flags & DH_FLAG_NO_EXP_CONSTTIME) == 0) {
+            BN_init(&local_prk);
+            prk = &local_prk;
+            BN_with_flags(prk, priv_key, BN_FLG_CONSTTIME);
+        } else
+            prk = priv_key;
+
+        if (!dh->meth->bn_mod_exp(dh, pub_key, dh->g, prk, dh->p, ctx, mont))
+            goto err;
+    }
+
+    dh->pub_key = pub_key;
+    dh->priv_key = priv_key;
+    ok = 1;
+ err:
+    if (buf != NULL){
+	OPENSSL_cleanse(buf, bytes);
+	OPENSSL_free(buf);
+    }
+    if (ok != 1)
+        DHerr(DH_F_GENERATE_KEY, ERR_R_BN_LIB);
+
+    if ((pub_key != NULL) && (dh->pub_key == NULL))
+        BN_free(pub_key);
+    if ((priv_key != NULL) && (dh->priv_key == NULL))
+        BN_free(priv_key);
+    BN_CTX_free(ctx);
+    return (ok);
+}
+

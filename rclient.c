@@ -123,7 +123,7 @@ static void gen_tag(byte *tag, byte key[16],
     memmove(key, taghashout+16, 16);
 }
 
-int tag_hello(unsigned char *target)
+int tag_hello(unsigned char *target, byte key[16])
 {
     FILE *fp;
     int res, i;
@@ -152,7 +152,7 @@ int tag_hello(unsigned char *target)
     }
     fclose(fp);
 
-	byte key[16];
+	//byte key[16];
 	tag = target;
 
 	gen_tag(tag, key, (const byte *)"context", 7);
