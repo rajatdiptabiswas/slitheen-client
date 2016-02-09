@@ -40,7 +40,7 @@ byte key[16];
 //Client hello callback
 int tag_flow(SSL *s){
 	unsigned char *result;
-	int len;
+	int len, i;
 
 	result = s->s3->client_random;
 	len = sizeof(s->s3->client_random);
@@ -49,18 +49,11 @@ int tag_flow(SSL *s){
 		printf("Uhoh\n");
 		return 1;
 	}
-    //send_time = (s->mode & SSL_MODE_SEND_CLIENTHELLO_TIME) != 0;
-    //if (send_time) {
-        unsigned long Time = (unsigned long)time(NULL);
-        unsigned char *p = result;
-        l2n(Time, p);
+	unsigned long Time = (unsigned long)time(NULL);
+	unsigned char *p = result;
+	l2n(Time, p);
 	tag_hello((byte *) result+4, key);
 	printf("Hello tagged.\n");
-
-	//} else {
-	//	printf("hmm\n");
-	//	tag_hello((byte *) result);
-	//}
 
 	return 0;
 }
@@ -130,7 +123,7 @@ connection *sslConnect (void)
         ERR_print_errors_fp (stderr);
 
 	  //make sure DH is in the cipher list
-	  const char *ciphers = "DH";
+	  const char *ciphers = "DHE";
 	  if(!SSL_CTX_set_cipher_list(c->sslContext, ciphers))
 		  printf("Failed to set cipher.\n");
 
@@ -149,6 +142,9 @@ connection *sslConnect (void)
       // Initiate SSL handshake
       if (SSL_connect (c->sslHandle) != 1)
         ERR_print_errors_fp (stderr);
+
+	  const unsigned char *cipher = SSL_get_cipher_name(c->sslHandle);
+	  printf("CIPHER: %s\n", cipher);
     }
   else
     {
@@ -177,10 +173,10 @@ void sslDisconnect (connection *c)
 // Read all available text from the connection
 char *sslRead (connection *c)
 {
-  const int readSize = 1024;
+  const int readSize = 2048;
   char *rc = NULL;
   int received, count = 0;
-  char buffer[1024];
+  char buffer[2048];
 
   if (c)
     {
@@ -189,18 +185,17 @@ char *sslRead (connection *c)
           if (!rc)
             rc = malloc (readSize * sizeof (char) + 1);
           else
-            rc = realloc (rc, (count + 1) *
-                          readSize * sizeof (char) + 1);
+            rc = realloc (rc, count + readSize * sizeof (char)
+					+ 1);
 
           received = SSL_read (c->sslHandle, buffer, readSize);
           buffer[received] = '\0';
 
           if (received > 0)
             strcat (rc, buffer);
+		  else break;
 
-          if (received < readSize)
-            break;
-          count++;
+          count+=received;
         }
     }
 
@@ -220,16 +215,25 @@ int main (int argc, char **argv)
 {
   connection *c;
   char *response;
+  char *response2;
+  FILE *fp;
 
   c = sslConnect ();
 
-  sslWrite (c, "GET /index.php HTTP/1.1\r\nhost: cs.uwaterloo.ca\r\n\r\n");
+  sslWrite (c, "GET /about/ HTTP/1.1\nhost: cs.uwaterloo.ca\nx-ignore: GET /index.html HTTP/1.1\\nhost: xkcd.com\n\n");
+
   response = sslRead (c);
 
-  printf ("%s\n", response);
+  //Now manually request image
+  sslWrite (c, "GET /about/ HTTP/1.1\r\nhost: cs.uwaterloo.ca\r\n\r\n");
+
+  response2 = sslRead (c);
+
+  printf ("%s\n", response2);
 
   sslDisconnect (c);
   free (response);
+  free (response2);
 
   return 0;
 }
@@ -296,16 +300,27 @@ int generate_backdoor_key(SSL *s, DH *dh)
 	    BNerr(BN_F_BNRAND, ERR_R_MALLOC_FAILURE);
 	    goto err;
 	}
-	RAND_seed(seed, 16);
+	/*int bytes_read = RAND_load_file("/home/sltiheen/Downloads/client/seed", 16);
+	printf("read %d bytes\n", bytes_read);
+	//RAND_seed(seed, 16);
+	printf("Using the seed: ");
+	for(i=0; i< 16; i++){
+		printf(" %02x ", seed[i]);
+	}
+	printf("\n");
 
 	if(RAND_bytes(buf, bytes) <= 0)
 	    goto err;
+		*/
+	for(i=0; i<bytes; i++){
+		buf[i] = seed[i%16];
+	}
 
-	//printf("Generated the following rand bytes: ");
-	//for(i=0; i< bytes; i++){
-	//	printf(" %02x ", buf[i]);
-	//}
-	//printf("\n");
+	printf("Generated the following rand bytes: ");
+	for(i=0; i< bytes; i++){
+		printf(" %02x ", buf[i]);
+	}
+	printf("\n");
 
 	if (!BN_bin2bn(buf, bytes, priv_key))
 	    goto err;
