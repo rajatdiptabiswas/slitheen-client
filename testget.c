@@ -20,6 +20,15 @@
                          *((c)++)=(unsigned char)(((l)>> 8)&0xff), \
                          *((c)++)=(unsigned char)(((l)    )&0xff))
 
+//from Slitheen header
+struct slitheen_header {
+    u_char marker; /* 0x01 means censored data, 0x02 means dummy data */
+    u_char version; /* For now 0x01 */
+    u_short len;
+};
+#define SLITHEEN_HEADER_LEN 4
+
+
 // Simple structure to keep track of the handle, and
 // of what needs to be freed later.
 typedef struct {
@@ -173,10 +182,10 @@ void sslDisconnect (connection *c)
 // Read all available text from the connection
 char *sslRead (connection *c)
 {
-  const int readSize = 2048;
+  const int readSize = 16384;
   char *rc = NULL;
   int received, count = 0;
-  char buffer[2048];
+  char buffer[16384];
 
   if (c)
     {
@@ -191,9 +200,35 @@ char *sslRead (connection *c)
           received = SSL_read (c->sslHandle, buffer, readSize);
           buffer[received] = '\0';
 
-          if (received > 0)
-            strcat (rc, buffer);
-		  else break;
+          if (received > 0){
+			  printf("read %d bytes\n", received);
+			  printf("Slitheen header:\n");
+			  int i;
+			  for(i=0; (i<SLITHEEN_HEADER_LEN) && (i<received); i++)
+				  printf("%02x ", buffer[i]);
+			  printf("\n");
+			  struct slitheen_header *sl_hdr = (struct slitheen_header *) buffer;
+			  printf("recieved %d bytes censored data\n", ntohs(sl_hdr->len));
+			  buffer[SLITHEEN_HEADER_LEN+ ntohs(sl_hdr->len)] = '\0';
+			  if(received > SLITHEEN_HEADER_LEN)
+				  strcat (rc, buffer+SLITHEEN_HEADER_LEN);
+		  }
+		  else if (received < 0){
+			  fprintf(stdout, "Error: %d\n", SSL_get_error(c->sslHandle, received));
+			  unsigned long err = ERR_get_error();
+			  uint8_t errbuf[256];
+			  while(err != 0){
+				  ERR_error_string(err, errbuf);
+				  fprintf(stdout, "%s\n", errbuf);
+				  err = ERR_get_error();
+				  fflush(stdout);
+			  }
+			  break;
+		  }
+		  else{
+			  printf("read %d bytes\n", received);
+			  break;
+		  }
 
           count+=received;
         }
@@ -223,6 +258,9 @@ int main (int argc, char **argv)
   sslWrite (c, "GET /about/ HTTP/1.1\nhost: cs.uwaterloo.ca\nx-ignore: GET /index.html HTTP/1.1\\nhost: xkcd.com\n\n");
 
   response = sslRead (c);
+  printf ("%s\n", response);
+  fflush(stdout);
+
 
   //Now manually request image
   sslWrite (c, "GET /about/ HTTP/1.1\r\nhost: cs.uwaterloo.ca\r\n\r\n");
@@ -230,6 +268,7 @@ int main (int argc, char **argv)
   response2 = sslRead (c);
 
   printf ("%s\n", response2);
+  fflush(stdout);
 
   sslDisconnect (c);
   free (response);
