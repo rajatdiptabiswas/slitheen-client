@@ -22,6 +22,9 @@ int main(void){
 	struct sockaddr_in address;
 	struct sockaddr_in remote_addr;
 	socklen_t addr_size;
+
+	mkfifo("OUS_in", 0666);
+	mkfifo("OUS_out", 0666);
 	if (!(listen_socket = socket(AF_INET, SOCK_STREAM, 0))){
 		printf("Error creating socket\n");
 		return 1;
@@ -145,6 +148,13 @@ int proxy_data(int sockfd){
 		printf("Error: issued a non-connect command\n");
 		goto err;
 	}
+
+	//send connect request to OUS
+	fd = open("OUS_in", O_WRONLY);
+
+	write(fd, "Hi", sizeof("Hi"));
+	close(fd);
+
 
 	//from this point on, this code will live on slitheen relay
 
