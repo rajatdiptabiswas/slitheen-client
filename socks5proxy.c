@@ -21,6 +21,8 @@
 #include <openssl/evp.h>
 #include<openssl/buffer.h>
 
+#define SLITHEEN_ID_LEN 10
+
 #define NEW
 
 int proxy_data(int sockfd, uint8_t stream_id, int32_t pipefd);
@@ -59,6 +61,55 @@ int main(void){
 	socklen_t addr_size;
 
 	mkfifo("OUS_out", 0666);
+
+	//randomly generate slitheen id
+	uint8_t slitheen_id[SLITHEEN_ID_LEN];
+	RAND_bytes(slitheen_id, SLITHEEN_ID_LEN);
+	printf("Randomly generated slitheen id: ");
+	int i;
+	for(i=0; i< SLITHEEN_ID_LEN; i++){
+		printf("%02x ", slitheen_id[i]);
+	}
+	printf("\n");
+
+	//b64 encode slitheen ID
+	const char *encoded_bytes;
+	BUF_MEM *buffer_ptr;
+	BIO *bio, *b64;
+	b64 = BIO_new(BIO_f_base64());
+	bio = BIO_new(BIO_s_mem());
+	bio = BIO_push(b64, bio);
+
+	BIO_set_flags(bio, BIO_FLAGS_BASE64_NO_NL);
+	BIO_write(bio, slitheen_id, SLITHEEN_ID_LEN);
+	BIO_flush(bio);
+	BIO_get_mem_ptr(bio, &buffer_ptr);
+	BIO_set_close(bio, BIO_NOCLOSE);
+	BIO_free_all(bio);
+	encoded_bytes = (*buffer_ptr).data;
+
+	//give encoded slitheen ID to ous
+	struct sockaddr_in ous_addr;
+	ous_addr.sin_family = AF_INET;
+	inet_pton(AF_INET, "127.0.0.1", &(ous_addr.sin_addr));
+	ous_addr.sin_port = htons(8888);
+
+	int32_t ous_in = socket(AF_INET, SOCK_STREAM, 0);
+	if(ous_in < 0){
+		printf("Failed to make ous_in socket\n");
+		return 1;
+	}
+
+	int32_t error = connect(ous_in, (struct sockaddr *) &ous_addr, sizeof (struct sockaddr));
+	if(error < 0){
+		printf("Error connecting\n");
+		return 1;
+	}
+	uint8_t *message = calloc(1, BUFSIZ);
+	sprintf(message, "POST / HTTP/1.1\r\nContent-Length: %d\r\n\r\n%s ", strlen(encoded_bytes), encoded_bytes);
+	int32_t bytes_sent = send(ous_in, message, strlen(message), 0);
+	printf("Wrote %d bytes to OUS_in: %s\n", bytes_sent, message);
+	free(message);
 
 	/* Spawn process to listen for incoming data from OUS 
 	int32_t demux_pipe[2];
