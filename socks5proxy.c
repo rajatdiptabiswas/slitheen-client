@@ -19,31 +19,32 @@
 
 #include <openssl/bio.h>
 #include <openssl/evp.h>
-#include<openssl/buffer.h>
+#include <openssl/buffer.h>
 
 #define SLITHEEN_ID_LEN 10
 
 #define NEW
 
-int proxy_data(int sockfd, uint8_t stream_id, int32_t pipefd);
+int proxy_data(int sockfd, uint16_t stream_id, int32_t pipefd);
 void *demultiplex_data();
 
-struct __attribute__ ((__packed__)) slitheen_hdr{
-	uint8_t stream_id;
+struct __attribute__ ((__packed__)) slitheen_hdr {
+	uint64_t counter;
+	uint16_t stream_id;
 	uint16_t len;
-	uint16_t garbage_len;
+	uint32_t garbage;
 };
 
-#define SLITHEEN_HEADER_LEN 5
+#define SLITHEEN_HEADER_LEN 16
 
 struct __attribute__ ((__packed__)) slitheen_up_hdr{
-	uint8_t stream_id;
+	uint16_t stream_id;
 	uint16_t len;
 };
 
 typedef struct connection_st{
 	int32_t pipe_fd;
-	uint8_t stream_id;
+	uint16_t stream_id;
 	struct connection_st *next;
 } connection;
 
@@ -226,7 +227,7 @@ struct socks_req {
 };
 
 //continuously read from the socket and look for a CONNECT message
-int proxy_data(int sockfd, uint8_t stream_id, int32_t ous_out){
+int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 	uint8_t *buffer = calloc(1, BUFSIZ);
 	uint8_t *response = calloc(1, BUFSIZ);
 	printf("ous out pipe fd: %d\n", ous_out);
@@ -316,13 +317,13 @@ int proxy_data(int sockfd, uint8_t stream_id, int32_t ous_out){
 	fflush(stdout);
 
 	//pre-pend stream_id and length
-	memmove(buffer+3, buffer, bytes_read+1);
+	memmove(buffer+sizeof(struct slitheen_up_hdr), buffer, bytes_read+1);
 
 	struct slitheen_up_hdr *up_hdr = (struct slitheen_up_hdr *) buffer;
 	up_hdr->stream_id = stream_id;
 	up_hdr->len = htons(bytes_read);
 
-	bytes_read+= 3;
+	bytes_read+= sizeof(struct slitheen_up_hdr);
 
 	//encode bytes for safe transport (b64)
 	const char *encoded_bytes;
@@ -500,7 +501,7 @@ int proxy_data(int sockfd, uint8_t stream_id, int32_t ous_out){
 				up_hdr->stream_id = stream_id;
 				up_hdr->len = htons(bytes_read);
 
-				bytes_read+= 3;
+				bytes_read+= sizeof(struct slitheen_up_hdr);
 
 				bio = BIO_new(BIO_s_mem());
 				b64 = BIO_new(BIO_f_base64());
@@ -598,6 +599,9 @@ err:
 	exit(0);
 }
 
+/* Read blocks of covert data from OUS_out. Determine the stream id and the length of
+ * the block and then write the data to the correct thread to be passed to the browser
+ */
 void *demultiplex_data(){
 
 	int32_t buffer_len = BUFSIZ;
@@ -607,55 +611,108 @@ void *demultiplex_data(){
 	printf("Opening OUS_out\n");
 	int32_t ous_fd = open("OUS_out", O_RDONLY);
 	printf("Opened.\n");
-	uint8_t *overflow;
-	uint32_t overflow_len = 0;
+	uint8_t *partial_block;
+	uint32_t partial_block_len = 0;
+	uint32_t resource_remaining = 0;
 
 	for(;;){
-		int32_t bytes_read = read(ous_fd, buffer, buffer_len-overflow_len);
+		int32_t bytes_read = read(ous_fd, buffer, buffer_len-partial_block_len);
 		
 		if(bytes_read > 0){
 			int32_t bytes_remaining = bytes_read;
-
-			if(overflow_len > 0){
-				//process first part of slitheen info
-				printf("Completeing previously read header\n");
-				memmove(buffer+overflow_len, buffer, bytes_read);
-				memcpy(buffer, overflow, overflow_len);
-				bytes_remaining += overflow_len;
-				free(overflow);
-				overflow_len = 0;
-			}
-
+			printf("Read in %d bytes from OUS_out\n", bytes_remaining);
 			p = buffer;
+
+			//the first value for a new resource will be the resource length,
+			//followed by a newline
+			if(resource_remaining > 0){
+				printf("Completing previously started resource. Reading in %d out of %d bytes remaining in resource\n", bytes_remaining, resource_remaining);
+				resource_remaining -= bytes_remaining;
+
+				if((bytes_remaining > 0) && (partial_block_len > 0)){
+					//process first part of slitheen info
+					printf("Completing previously read Slitheen block\n");
+					memmove(buffer+partial_block_len, buffer, bytes_read);
+					memcpy(buffer, partial_block, partial_block_len);
+					bytes_remaining += partial_block_len;
+					free(partial_block);
+					partial_block_len = 0;
+				}
+
+			} else {
+				uint8_t *end_ptr;
+				resource_remaining = strtol((const char *) p, (char **) &end_ptr, 10);
+				if(resource_remaining == 0){
+					printf("UH OH, resource_remaining is zero or there was an error O.o\n");
+				} else {
+					bytes_remaining -= (end_ptr - p) + 1;
+					p += (end_ptr - p) + 1;
+
+					printf("Reading in %d out of %d bytes of new resource\n",
+							bytes_remaining, resource_remaining);
+
+					if(resource_remaining < bytes_remaining){
+						resource_remaining = 0;
+						printf("UH OH, shouldn't be here\n");
+					} else {
+						resource_remaining -= bytes_remaining;
+					}
+				}
+			}
+			
+
 			while(bytes_remaining > 0){
-				if(bytes_remaining < SLITHEEN_HEADER_LEN){
+
+				if(bytes_remaining + resource_remaining < SLITHEEN_HEADER_LEN){
+					printf("Resource is padded out with garbage\n");
+					bytes_remaining = 0;
+					break;
+				}
+
+				if((bytes_remaining < SLITHEEN_HEADER_LEN)){
 					printf("Partial header: ");
 					int i;
 					for(i = 0; i< bytes_remaining; i++){
 						printf("%02x ", p[i]);
 					}
 					printf("\n");
+
+					partial_block = calloc(1, bytes_remaining);
+					memcpy(partial_block, p, bytes_remaining);
+					partial_block_len = bytes_remaining;
+					bytes_remaining = 0;
+					break;
 				}
 
 				struct slitheen_hdr *sl_hdr = (struct slitheen_hdr *) p;
 				//first see if sl_hdr corresponds to a valid stream. If not, ignore rest of read bytes
-#ifdef DEBUG
+//#ifdef DEBUG
 				printf("Slitheen header:\n");
 				int i;
 				for(i = 0; i< SLITHEEN_HEADER_LEN; i++){
 					printf("%02x ", p[i]);
 				}
 				printf("\n");
-#endif
+//#endif
 
-				p += sizeof(struct slitheen_hdr);
+				if(ntohs(sl_hdr->len) > bytes_remaining){
+					printf("Received partial block\n");
+					partial_block = calloc(1, ntohs(sl_hdr->len));
+					memcpy(partial_block, p, bytes_remaining);
+					partial_block_len = bytes_remaining;
+					bytes_remaining = 0;
+					break;
+				}
 
-				if(sl_hdr->stream_id == 0){
-#ifdef DEBUG
+				p += SLITHEEN_HEADER_LEN;
+				bytes_remaining -= SLITHEEN_HEADER_LEN;
+
+				if(sl_hdr->garbage){
+//#ifdef DEBUG
 					printf("Garbage bytes\n");
-#endif
+//#endif
 					p += ntohs(sl_hdr->len);
-					bytes_remaining -= sizeof(struct slitheen_hdr) + ntohs(sl_hdr->len);
+					bytes_remaining -= ntohs(sl_hdr->len);
 					continue;
 				}
 
@@ -684,25 +741,15 @@ void *demultiplex_data(){
 					break;
 				}
 				
-				if(ntohs(sl_hdr->len)+ sizeof(struct slitheen_hdr) > bytes_remaining){
-					overflow = calloc(1, bytes_remaining);
-					memcpy(overflow, p, bytes_remaining);
-					overflow_len = bytes_remaining;
-					bytes_remaining = 0;
-					break;
-				}
+				printf("Received information for stream id: %d of length: %u\n", sl_hdr->stream_id, ntohs(sl_hdr->len));
 
-				if(sl_hdr->garbage_len == 0){
-					printf("Received information for stream id: %d of length: %u\n", sl_hdr->stream_id, ntohs(sl_hdr->len));
-
-					int32_t bytes_sent = write(pipe_fd, p, ntohs(sl_hdr->len));
-					if(bytes_sent <= 0){
-						printf("Error reading to pipe for stream id %d\n", sl_hdr->stream_id);
-					}
+				int32_t bytes_sent = write(pipe_fd, p, ntohs(sl_hdr->len));
+				if(bytes_sent <= 0){
+					printf("Error reading to pipe for stream id %d\n", sl_hdr->stream_id);
 				}
 
 				p += ntohs(sl_hdr->len);
-				bytes_remaining -= sizeof(struct slitheen_hdr) + ntohs(sl_hdr->len);
+				bytes_remaining -= ntohs(sl_hdr->len);
 			}
 
 		} else {
