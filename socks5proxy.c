@@ -22,6 +22,9 @@
 #include <openssl/buffer.h>
 
 #define SLITHEEN_ID_LEN 10
+#define SLITHEEN_SUPER_SECRET_SIZE 10
+#define SLITHEEN_SUPER_CONST "SLITHEEN_SUPER_ENCRYPT"
+#define SLITHEEN_SUPER_CONST_SIZE 22
 
 #define NEW
 
@@ -32,7 +35,8 @@ struct __attribute__ ((__packed__)) slitheen_hdr {
 	uint64_t counter;
 	uint16_t stream_id;
 	uint16_t len;
-	uint32_t garbage;
+	uint16_t garbage;
+	uint16_t zeros;
 };
 
 #define SLITHEEN_HEADER_LEN 16
@@ -54,6 +58,16 @@ typedef struct connection_table_st{
 
 static connection_table *connections;
 
+typedef struct super_data_st {
+	//EVP_CIPHER_CTX *header_ctx;
+	//EVP_CIPHER_CTX *body_ctx;
+	uint8_t *header_key;
+	uint8_t *body_key;
+	EVP_MD_CTX *body_mac_ctx;
+} super_data;
+
+static super_data *super;
+
 int main(void){
 	int listen_socket;
 	
@@ -72,6 +86,9 @@ int main(void){
 		printf("%02x ", slitheen_id[i]);
 	}
 	printf("\n");
+
+	// Calculate super encryption keys
+	generate_super_keys(slitheen_id);
 
 	//b64 encode slitheen ID
 	const char *encoded_bytes;
@@ -107,7 +124,7 @@ int main(void){
 		return 1;
 	}
 	uint8_t *message = calloc(1, BUFSIZ);
-	sprintf(message, "POST / HTTP/1.1\r\nContent-Length: %d\r\n\r\n%s ", strlen(encoded_bytes), encoded_bytes);
+	sprintf(message, "POST / HTTP/1.1\r\nContent-Length: %zd\r\n\r\n%s ", strlen(encoded_bytes), encoded_bytes);
 	int32_t bytes_sent = send(ous_in, message, strlen(message), 0);
 	printf("Wrote %d bytes to OUS_in: %s\n", bytes_sent, message);
 	free(message);
@@ -210,6 +227,170 @@ int main(void){
 		close(new_socket);
 		
 	}
+
+	return 0;
+}
+
+int PRF(uint8_t *secret, int32_t secret_len,
+        uint8_t *seed1, int32_t seed1_len,
+        uint8_t *seed2, int32_t seed2_len,
+        uint8_t *seed3, int32_t seed3_len,
+        uint8_t *seed4, int32_t seed4_len,
+        uint8_t *output, int32_t output_len){
+
+    EVP_MD_CTX ctx, ctx_tmp, ctx_init;
+    EVP_PKEY *mac_key;
+    const EVP_MD *md = EVP_sha256();
+
+    uint8_t A[EVP_MAX_MD_SIZE];
+    size_t len, A_len;
+    int chunk = EVP_MD_size(md);
+    int remaining = output_len;
+
+    uint8_t *out = output;
+
+    EVP_MD_CTX_init(&ctx);
+    EVP_MD_CTX_init(&ctx_tmp);
+    EVP_MD_CTX_init(&ctx_init);
+    EVP_MD_CTX_set_flags(&ctx_init, EVP_MD_CTX_FLAG_NON_FIPS_ALLOW);
+
+    mac_key = EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, NULL, secret, secret_len);
+
+    /* Calculate first A value */
+    EVP_DigestSignInit(&ctx_init, NULL, md, NULL, mac_key);
+    EVP_MD_CTX_copy_ex(&ctx, &ctx_init);
+    if(seed1 != NULL && seed1_len > 0){
+        EVP_DigestSignUpdate(&ctx, seed1, seed1_len);
+    }
+    if(seed2 != NULL && seed2_len > 0){
+        EVP_DigestSignUpdate(&ctx, seed2, seed2_len);
+    }
+    if(seed3 != NULL && seed3_len > 0){
+        EVP_DigestSignUpdate(&ctx, seed3, seed3_len);
+    }
+    if(seed4 != NULL && seed4_len > 0){
+        EVP_DigestSignUpdate(&ctx, seed4, seed4_len);
+    }
+    EVP_DigestSignFinal(&ctx, A, &A_len);
+
+    //iterate until desired length is achieved
+    while(remaining > 0){
+        /* Now compute SHA384(secret, A+seed) */
+        EVP_MD_CTX_copy_ex(&ctx, &ctx_init);
+        EVP_DigestSignUpdate(&ctx, A, A_len);
+        EVP_MD_CTX_copy_ex(&ctx_tmp, &ctx);
+        if(seed1 != NULL && seed1_len > 0){
+            EVP_DigestSignUpdate(&ctx, seed1, seed1_len);
+        }
+        if(seed2 != NULL && seed2_len > 0){
+            EVP_DigestSignUpdate(&ctx, seed2, seed2_len);
+        }
+        if(seed3 != NULL && seed3_len > 0){
+            EVP_DigestSignUpdate(&ctx, seed3, seed3_len);
+        }
+        if(seed4 != NULL && seed4_len > 0){
+            EVP_DigestSignUpdate(&ctx, seed4, seed4_len);
+        }
+
+        if(remaining > chunk){
+            EVP_DigestSignFinal(&ctx, out, &len);
+            out += len;
+            remaining -= len;
+
+            /* Next A value */
+            EVP_DigestSignFinal(&ctx_tmp, A, &A_len);
+        } else {
+            EVP_DigestSignFinal(&ctx, A, &A_len);
+            memcpy(out, A, remaining);
+            remaining -= remaining;
+        }
+    }
+    EVP_PKEY_free(mac_key);
+    EVP_MD_CTX_cleanup(&ctx);
+    EVP_MD_CTX_cleanup(&ctx_tmp);
+    EVP_MD_CTX_cleanup(&ctx_init);
+    OPENSSL_cleanse(A, sizeof(A));
+    return 0;
+}
+/*
+ * Generate the keys for the super encryption layer, based on the slitheen ID
+ */
+int generate_super_keys(uint8_t *secret){
+
+	super = calloc(1, sizeof(super_data));
+	
+	//need 2 encryption keys, 2 ivs, and a mac
+	//EVP_CIPHER_CTX *hdr_ctx;
+    //EVP_CIPHER_CTX *bdy_ctx;
+    EVP_MD_CTX *mac_ctx;
+
+    const EVP_MD *md = EVP_sha256();
+
+    /* Generate Keys */
+    uint8_t *hdr_key, *hdr_iv;
+    uint8_t *bdy_key, *bdy_iv;
+    uint8_t *mac_secret;
+    EVP_PKEY *mac_key;
+    int32_t mac_len, key_len, iv_len;
+
+    key_len = EVP_CIPHER_key_length(EVP_aes_256_cbc());
+    iv_len = EVP_CIPHER_iv_length(EVP_aes_256_cbc());
+    mac_len = EVP_MD_size(md);
+    int32_t total_len = 2*key_len + 2*iv_len + mac_len;
+    uint8_t *key_block = calloc(1, total_len);
+
+    PRF(secret, SLITHEEN_SUPER_SECRET_SIZE,
+            (uint8_t *) SLITHEEN_SUPER_CONST, SLITHEEN_SUPER_CONST_SIZE,
+            NULL, 0,
+            NULL, 0,
+            NULL, 0,
+            key_block, total_len);
+
+//#ifdef DEBUG
+	int i;
+    printf("secret: \n");
+    for(i=0; i< SLITHEEN_SUPER_SECRET_SIZE; i++){
+        printf("%02x ", secret[i]);
+    }
+    printf("\n");
+    printf("keyblock: \n");
+    for(i=0; i< total_len; i++){
+        printf("%02x ", key_block[i]);
+    }
+    printf("\n");
+//#endif
+
+    hdr_key = key_block;
+    bdy_key = key_block + key_len;
+    hdr_iv = key_block + 2*key_len;
+    bdy_iv = key_block + 2*key_len + iv_len;
+    mac_secret = key_block + 2*key_len + 2*iv_len;
+
+    /* Initialize Cipher Contexts */
+    //hdr_ctx = EVP_CIPHER_CTX_new();
+    //bdy_ctx = EVP_CIPHER_CTX_new();
+
+    //EVP_CipherInit_ex(hdr_ctx, EVP_aes_128_ecb(), NULL, hdr_key, NULL, 0);
+    //EVP_CipherInit_ex(bdy_ctx, EVP_aes_256_cbc(), NULL, bdy_key, bdy_iv, 0);
+
+    /* Initialize MAC Context */
+    mac_ctx = EVP_MD_CTX_create();
+
+    EVP_DigestInit_ex(mac_ctx, md, NULL);
+    mac_key = EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, NULL, mac_secret, mac_len);
+    EVP_DigestSignInit(mac_ctx, NULL, md, NULL, mac_key);
+
+    //super->header_ctx = hdr_ctx;
+    //super->body_ctx = bdy_ctx;
+	super->header_key = malloc(key_len);
+	super->body_key = malloc(key_len);
+	memcpy(super->header_key, hdr_key, key_len);
+	memcpy(super->body_key, bdy_key, key_len);
+    super->body_mac_ctx = mac_ctx;
+
+    //Free everything
+    free(key_block);
+    EVP_PKEY_free(mac_key);
 
 	return 0;
 }
@@ -374,7 +555,7 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 
 #ifdef NEW
 	uint8_t *message = calloc(1, BUFSIZ);
-	sprintf(message, "POST / HTTP/1.1\r\nContent-Length: %d\r\n\r\n%s ", strlen(encoded_bytes)+1, encoded_bytes);
+	sprintf(message, "POST / HTTP/1.1\r\nContent-Length: %zd\r\n\r\n%s ", strlen(encoded_bytes)+1, encoded_bytes);
 	bytes_sent = send(ous_in, message, strlen(message), 0);
 	printf("Wrote %d bytes to OUS_in: %s\n", bytes_sent, message);
 #endif
@@ -478,7 +659,7 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 					goto err;
 				}
 
-				sprintf(message, "POST / HTTP/1.1\r\nContent-Length: %d\r\n\r\n%s ", strlen(encoded_bytes)+1, encoded_bytes);
+				sprintf(message, "POST / HTTP/1.1\r\nContent-Length: %zd\r\n\r\n%s ", strlen(encoded_bytes)+1, encoded_bytes);
 				bytes_sent = send(ous_in, message, strlen(message), 0);
 				close(ous_in);
 
@@ -541,7 +722,7 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 					return 1;
 				}
 
-				sprintf(message, "POST / HTTP/1.1\r\nContent-Length: %d\r\n\r\n%s ", strlen(encoded_bytes)+1, encoded_bytes);
+				sprintf(message, "POST / HTTP/1.1\r\nContent-Length: %zd\r\n\r\n%s ", strlen(encoded_bytes)+1, encoded_bytes);
 				bytes_sent = send(ous_in, message, strlen(message), 0);
 				printf("Sent to OUS (%d bytes):%s\n",bytes_sent, message);
 				close(ous_in);
@@ -684,6 +865,8 @@ void *demultiplex_data(){
 					break;
 				}
 
+				super_decrypt(p);
+
 				struct slitheen_hdr *sl_hdr = (struct slitheen_hdr *) p;
 				//first see if sl_hdr corresponds to a valid stream. If not, ignore rest of read bytes
 //#ifdef DEBUG
@@ -707,12 +890,12 @@ void *demultiplex_data(){
 				p += SLITHEEN_HEADER_LEN;
 				bytes_remaining -= SLITHEEN_HEADER_LEN;
 
-				if(sl_hdr->garbage){
+				if((!sl_hdr->len) && (sl_hdr->garbage)){
 //#ifdef DEBUG
-					printf("Garbage bytes\n");
+					printf("%d Garbage bytes\n", ntohs(sl_hdr->garbage));
 //#endif
-					p += ntohs(sl_hdr->len);
-					bytes_remaining -= ntohs(sl_hdr->len);
+					p += ntohs(sl_hdr->garbage);
+					bytes_remaining -= ntohs(sl_hdr->garbage);
 					continue;
 				}
 
@@ -743,13 +926,29 @@ void *demultiplex_data(){
 				
 				printf("Received information for stream id: %d of length: %u\n", sl_hdr->stream_id, ntohs(sl_hdr->len));
 
-				int32_t bytes_sent = write(pipe_fd, p, ntohs(sl_hdr->len));
+				//figure out how much to skip
+				
+				int32_t padding = 0;
+				if(ntohs(sl_hdr->len) %16){
+					padding = 16 - ntohs(sl_hdr->len)%16;
+				}
+					
+				p += 16; //IV
+
+				int32_t bytes_sent = write(pipe_fd, p, ntohs(sl_hdr->len) - padding);
 				if(bytes_sent <= 0){
 					printf("Error reading to pipe for stream id %d\n", sl_hdr->stream_id);
 				}
 
-				p += ntohs(sl_hdr->len);
-				bytes_remaining -= ntohs(sl_hdr->len);
+				p += ntohs(sl_hdr->len); //encrypted data
+				p += 16; //mac
+				p += padding;
+				p += ntohs(sl_hdr->garbage);
+				printf("Skipped %d garbage bytes\n", ntohs(sl_hdr->garbage));
+				fflush(stdout);
+				bytes_remaining -= 
+					ntohs(sl_hdr->len) + 16 + padding + 16 + ntohs(sl_hdr->garbage);
+				printf("Bytes remaining: %d, padding: %d\n", bytes_remaining, padding);
 			}
 
 		} else {
@@ -763,5 +962,94 @@ void *demultiplex_data(){
 	}
 
 	close(ous_fd);
+
+}
+
+int super_decrypt(uint8_t *data){
+
+	EVP_CIPHER_CTX *bdy_ctx;
+
+	uint8_t *p = data;
+	int32_t out_len, len;
+	uint8_t output[EVP_MAX_MD_SIZE];
+	size_t mac_len;
+	int i;
+
+	/*decrypt header
+	printf("Encrypted header:\n");
+	for(i=0; i< SLITHEEN_HEADER_LEN; i++){
+		printf("%02x ", p[i]);
+	}
+	printf("\n");
+
+	if(!EVP_CipherUpdate(super->header_ctx, p, &out_len, p, SLITHEEN_HEADER_LEN)){
+		printf("Decryption failed!");
+		return 0;
+	}
+	*/
+
+	printf("Decrypted header (%d bytes):\n", SLITHEEN_HEADER_LEN);
+	for(i=0; i< SLITHEEN_HEADER_LEN; i++){
+		printf("%02x ", p[i]);
+	}
+	printf("\n");
+	fflush(stdout);
+	
+	struct slitheen_hdr *sl_hdr = (struct slitheen_hdr *) p;
+	len = htons(sl_hdr->len);
+	if(!sl_hdr->len){//there are no data to be decrypted
+		return 1;
+	}
+
+	p += SLITHEEN_HEADER_LEN;
+
+	//compute mac
+	EVP_DigestSignUpdate(super->body_mac_ctx, p, len);
+
+    EVP_DigestSignFinal(super->body_mac_ctx, output, &mac_len);
+
+#ifdef DEBUG
+	printf("Received mac:\n");
+	for(i=0; i< 16; i++){
+		printf("%02x ", p[len+i]);
+	}
+	printf("\n");
+	fflush(stdout);
+	if(memcmp(p+len, output, 16)){
+		printf("MAC verification failed\n");
+		return 0;
+	}
+#endif
+
+	//decrypt body
+    bdy_ctx = EVP_CIPHER_CTX_new();
+
+    EVP_CipherInit_ex(bdy_ctx, EVP_aes_256_cbc(), NULL, super->body_key, p, 0);
+
+	p+=16;//skip IV
+
+	printf("Encrypted data (%d bytes):\n", len);
+	for(i=0; i< len; i++){
+		printf("%02x ", p[i]);
+	}
+	printf("\n");
+
+	if(!EVP_CipherUpdate(bdy_ctx, p, &out_len, p, len+16)){
+		printf("Decryption failed!");
+		return 0;
+	}
+
+	EVP_CIPHER_CTX_free(bdy_ctx);
+
+	printf("Decrypted data (%d bytes):\n", out_len);
+	for(i=0; i< out_len; i++){
+		printf("%02x ", p[i]);
+	}
+	printf("\n");
+	fflush(stdout);
+
+	p += out_len;
+
+	return 1;
 
 }
