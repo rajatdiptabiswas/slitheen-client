@@ -68,6 +68,12 @@ typedef struct super_data_st {
 
 static super_data *super;
 
+typedef struct data_block_st {
+	uint64_t count;
+	uint8_t *data;
+	struct data_block_st *next;
+} data_block;
+
 int main(void){
 	int listen_socket;
 	
@@ -77,7 +83,7 @@ int main(void){
 
 	mkfifo("OUS_out", 0666);
 
-	//randomly generate slitheen id
+	//generate Slitheen ID using Telex tagging method
 	uint8_t slitheen_id[SLITHEEN_ID_LEN];
 	RAND_bytes(slitheen_id, SLITHEEN_ID_LEN);
 	printf("Randomly generated slitheen id: ");
@@ -795,24 +801,24 @@ void *demultiplex_data(){
 	uint8_t *partial_block;
 	uint32_t partial_block_len = 0;
 	uint32_t resource_remaining = 0;
+	uint64_t expected_next_count = 1;
+	data_block *saved_data = NULL;
 
 	for(;;){
 		int32_t bytes_read = read(ous_fd, buffer, buffer_len-partial_block_len);
 		
 		if(bytes_read > 0){
 			int32_t bytes_remaining = bytes_read;
-			printf("Read in %d bytes from OUS_out\n", bytes_remaining);
+			//printf("Read in %d bytes from OUS_out\n", bytes_remaining);
 			p = buffer;
 
 			//the first value for a new resource will be the resource length,
 			//followed by a newline
 			if(resource_remaining > 0){
-				printf("Completing previously started resource. Reading in %d out of %d bytes remaining in resource\n", bytes_remaining, resource_remaining);
 				resource_remaining -= bytes_remaining;
 
 				if((bytes_remaining > 0) && (partial_block_len > 0)){
 					//process first part of slitheen info
-					printf("Completing previously read Slitheen block\n");
 					memmove(buffer+partial_block_len, buffer, bytes_read);
 					memcpy(buffer, partial_block, partial_block_len);
 					bytes_remaining += partial_block_len;
@@ -828,9 +834,6 @@ void *demultiplex_data(){
 				} else {
 					bytes_remaining -= (end_ptr - p) + 1;
 					p += (end_ptr - p) + 1;
-
-					printf("Reading in %d out of %d bytes of new resource\n",
-							bytes_remaining, resource_remaining);
 
 					if(resource_remaining < bytes_remaining){
 						resource_remaining = 0;
@@ -869,14 +872,15 @@ void *demultiplex_data(){
 
 				struct slitheen_hdr *sl_hdr = (struct slitheen_hdr *) p;
 				//first see if sl_hdr corresponds to a valid stream. If not, ignore rest of read bytes
-//#ifdef DEBUG
+#ifdef DEBUG
 				printf("Slitheen header:\n");
 				int i;
 				for(i = 0; i< SLITHEEN_HEADER_LEN; i++){
 					printf("%02x ", p[i]);
 				}
 				printf("\n");
-//#endif
+#endif
+
 
 				if(ntohs(sl_hdr->len) > bytes_remaining){
 					printf("Received partial block\n");
@@ -891,9 +895,9 @@ void *demultiplex_data(){
 				bytes_remaining -= SLITHEEN_HEADER_LEN;
 
 				if((!sl_hdr->len) && (sl_hdr->garbage)){
-//#ifdef DEBUG
+#ifdef DEBUG
 					printf("%d Garbage bytes\n", ntohs(sl_hdr->garbage));
-//#endif
+#endif
 					p += ntohs(sl_hdr->garbage);
 					bytes_remaining -= ntohs(sl_hdr->garbage);
 					continue;
@@ -935,9 +939,58 @@ void *demultiplex_data(){
 					
 				p += 16; //IV
 
-				int32_t bytes_sent = write(pipe_fd, p, ntohs(sl_hdr->len) - padding);
-				if(bytes_sent <= 0){
-					printf("Error reading to pipe for stream id %d\n", sl_hdr->stream_id);
+				//check counter to see if we are missing data
+				if(sl_hdr->counter > expected_next_count){
+					//save any future data
+					printf("Received header with count %lu. Expected count %lu.\n",
+							sl_hdr->counter, expected_next_count);
+					if(saved_data == NULL){
+						saved_data = malloc(sizeof(data_block));
+						saved_data->count = sl_hdr->counter;
+						saved_data->data = malloc(ntohs(sl_hdr->len));
+						memcpy(saved_data->data, p, ntohs(sl_hdr->len));
+						saved_data->next = NULL;
+					} else {
+						data_block *last = saved_data;
+						while(last->next != NULL){
+							last = last->next;
+						}
+						data_block *new_block = malloc(sizeof(data_block));
+						new_block->count = sl_hdr->counter;
+						new_block->data = malloc(ntohs(sl_hdr->len));
+						memcpy(new_block->data, p, ntohs(sl_hdr->len));
+						new_block->next = NULL;
+
+						last->next = new_block;
+					}
+				} else {
+					int32_t bytes_sent = write(pipe_fd, p, ntohs(sl_hdr->len));
+					if(bytes_sent <= 0){
+						printf("Error reading to pipe for stream id %d\n",
+								sl_hdr->stream_id);
+					}
+
+					//increment expected counter
+					expected_next_count++;
+				}
+
+				//now check to see if there is saved data to write out
+				if(saved_data != NULL){
+					data_block *current_block = saved_data;
+					while((current_block != NULL) &&
+							(expected_next_count == current_block->count)){
+						printf("Writing out saved data with count %ld\n",
+								expected_next_count);
+						int32_t bytes_sent = write(pipe_fd, p, ntohs(sl_hdr->len));
+						if(bytes_sent <= 0){
+							printf("Error reading to pipe for stream id %d\n",
+									sl_hdr->stream_id);
+						}
+						expected_next_count++;
+						saved_data = current_block->next;
+						free(current_block);
+						current_block = saved_data;
+					}
 				}
 
 				p += ntohs(sl_hdr->len); //encrypted data
@@ -968,6 +1021,7 @@ void *demultiplex_data(){
 int super_decrypt(uint8_t *data){
 
 	EVP_CIPHER_CTX *bdy_ctx;
+	EVP_CIPHER_CTX *hdr_ctx;
 
 	uint8_t *p = data;
 	int32_t out_len, len;
@@ -975,18 +1029,31 @@ int super_decrypt(uint8_t *data){
 	size_t mac_len;
 	int i;
 
-	/*decrypt header
+	//decrypt header
+#ifdef DEBUG
 	printf("Encrypted header:\n");
 	for(i=0; i< SLITHEEN_HEADER_LEN; i++){
 		printf("%02x ", p[i]);
 	}
 	printf("\n");
+#endif
 
-	if(!EVP_CipherUpdate(super->header_ctx, p, &out_len, p, SLITHEEN_HEADER_LEN)){
+    hdr_ctx = EVP_CIPHER_CTX_new();
+
+    EVP_CipherInit_ex(hdr_ctx, EVP_aes_256_ecb(), NULL, super->header_key, NULL, 0);
+
+	if(!EVP_CipherUpdate(hdr_ctx, p, &out_len, p, SLITHEEN_HEADER_LEN)){
 		printf("Decryption failed!");
 		return 0;
 	}
-	*/
+
+	EVP_CIPHER_CTX_free(hdr_ctx);
+
+	struct slitheen_hdr *sl_hdr = (struct slitheen_hdr *) p;
+	len = htons(sl_hdr->len);
+	if(!sl_hdr->len){//there are no data to be decrypted
+		return 1;
+	}
 
 	printf("Decrypted header (%d bytes):\n", SLITHEEN_HEADER_LEN);
 	for(i=0; i< SLITHEEN_HEADER_LEN; i++){
@@ -995,12 +1062,6 @@ int super_decrypt(uint8_t *data){
 	printf("\n");
 	fflush(stdout);
 	
-	struct slitheen_hdr *sl_hdr = (struct slitheen_hdr *) p;
-	len = htons(sl_hdr->len);
-	if(!sl_hdr->len){//there are no data to be decrypted
-		return 1;
-	}
-
 	p += SLITHEEN_HEADER_LEN;
 
 	//compute mac
