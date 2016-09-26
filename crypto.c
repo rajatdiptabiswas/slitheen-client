@@ -4,7 +4,15 @@
 #include <openssl/err.h>
 #include <openssl/rand.h>
 #include <openssl/ssl.h>
+
+#include <netinet/in.h>
+
 #include "crypto.h"
+#include "socks5proxy.h"
+#include "tagging.h"
+#include "ptwist.h"
+
+static super_data *super;
 
 /* PRF using sha384, as defined in RFC 5246 */
 int PRF(uint8_t *secret, int32_t secret_len,
@@ -83,3 +91,170 @@ int PRF(uint8_t *secret, int32_t secret_len,
 	}
 	return 1;
 }
+
+
+/*
+ * Generate the keys for the super encryption layer, based on the slitheen ID
+ */
+int generate_super_keys(uint8_t *secret){
+
+	super = calloc(1, sizeof(super_data));
+	
+    EVP_MD_CTX *mac_ctx;
+
+    const EVP_MD *md = EVP_sha256();
+
+    /* Generate Keys */
+    uint8_t *hdr_key, *bdy_key;
+    uint8_t *mac_secret;
+    EVP_PKEY *mac_key;
+    int32_t mac_len, key_len;
+
+    key_len = EVP_CIPHER_key_length(EVP_aes_256_cbc());
+    mac_len = EVP_MD_size(md);
+    int32_t total_len = 2*key_len + mac_len;
+    uint8_t *key_block = calloc(1, total_len);
+
+    PRF(secret, SLITHEEN_SUPER_SECRET_SIZE,
+            (uint8_t *) SLITHEEN_SUPER_CONST, SLITHEEN_SUPER_CONST_SIZE,
+            NULL, 0,
+            NULL, 0,
+            NULL, 0,
+            key_block, total_len);
+
+//#ifdef DEBUG
+	int i;
+    printf("secret: \n");
+    for(i=0; i< SLITHEEN_SUPER_SECRET_SIZE; i++){
+        printf("%02x ", secret[i]);
+    }
+    printf("\n");
+    printf("keyblock: \n");
+    for(i=0; i< total_len; i++){
+        printf("%02x ", key_block[i]);
+    }
+    printf("\n");
+//#endif
+
+    hdr_key = key_block;
+    bdy_key = key_block + key_len;
+    mac_secret = key_block + 2*key_len;
+
+
+    /* Initialize MAC Context */
+    mac_ctx = EVP_MD_CTX_create();
+
+    EVP_DigestInit_ex(mac_ctx, md, NULL);
+    mac_key = EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, NULL, mac_secret, mac_len);
+    EVP_DigestSignInit(mac_ctx, NULL, md, NULL, mac_key);
+
+	super->header_key = malloc(key_len);
+	super->body_key = malloc(key_len);
+	memcpy(super->header_key, hdr_key, key_len);
+	memcpy(super->body_key, bdy_key, key_len);
+    super->body_mac_ctx = mac_ctx;
+
+    //Free everything
+    free(key_block);
+    EVP_PKEY_free(mac_key);
+
+	return 0;
+}
+
+int super_decrypt(uint8_t *data){
+
+	EVP_CIPHER_CTX *bdy_ctx;
+	EVP_CIPHER_CTX *hdr_ctx;
+
+	uint8_t *p = data;
+	int32_t out_len, len;
+	uint8_t output[EVP_MAX_MD_SIZE];
+	size_t mac_len;
+	int i;
+
+	//decrypt header
+#ifdef DEBUG
+	printf("Encrypted header:\n");
+	for(i=0; i< SLITHEEN_HEADER_LEN; i++){
+		printf("%02x ", p[i]);
+	}
+	printf("\n");
+#endif
+
+    hdr_ctx = EVP_CIPHER_CTX_new();
+
+    EVP_CipherInit_ex(hdr_ctx, EVP_aes_256_ecb(), NULL, super->header_key, NULL, 0);
+
+	if(!EVP_CipherUpdate(hdr_ctx, p, &out_len, p, SLITHEEN_HEADER_LEN)){
+		printf("Decryption failed!");
+		return 0;
+	}
+
+	EVP_CIPHER_CTX_free(hdr_ctx);
+
+	struct slitheen_hdr *sl_hdr = (struct slitheen_hdr *) p;
+	len = htons(sl_hdr->len);
+	if(!sl_hdr->len){//there are no data to be decrypted
+		return 1;
+	}
+
+	printf("Decrypted header (%d bytes):\n", SLITHEEN_HEADER_LEN);
+	for(i=0; i< SLITHEEN_HEADER_LEN; i++){
+		printf("%02x ", p[i]);
+	}
+	printf("\n");
+	fflush(stdout);
+	
+	p += SLITHEEN_HEADER_LEN;
+
+	//compute mac
+	EVP_DigestSignUpdate(super->body_mac_ctx, p, len);
+
+    EVP_DigestSignFinal(super->body_mac_ctx, output, &mac_len);
+
+#ifdef DEBUG
+	printf("Received mac:\n");
+	for(i=0; i< 16; i++){
+		printf("%02x ", p[len+i]);
+	}
+	printf("\n");
+	fflush(stdout);
+	if(memcmp(p+len, output, 16)){
+		printf("MAC verification failed\n");
+		return 0;
+	}
+#endif
+
+	//decrypt body
+    bdy_ctx = EVP_CIPHER_CTX_new();
+
+    EVP_CipherInit_ex(bdy_ctx, EVP_aes_256_cbc(), NULL, super->body_key, p, 0);
+
+	p+=16;//skip IV
+
+	printf("Encrypted data (%d bytes):\n", len);
+	for(i=0; i< len; i++){
+		printf("%02x ", p[i]);
+	}
+	printf("\n");
+
+	if(!EVP_CipherUpdate(bdy_ctx, p, &out_len, p, len+16)){
+		printf("Decryption failed!");
+		return 0;
+	}
+
+	EVP_CIPHER_CTX_free(bdy_ctx);
+
+	printf("Decrypted data (%d bytes):\n", out_len);
+	for(i=0; i< out_len; i++){
+		printf("%02x ", p[i]);
+	}
+	printf("\n");
+	fflush(stdout);
+
+	p += out_len;
+
+	return 1;
+
+}
+

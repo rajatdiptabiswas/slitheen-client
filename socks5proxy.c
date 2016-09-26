@@ -25,9 +25,11 @@
 
 #include "socks5proxy.h"
 #include "crypto.h"
+#include "tagging.h"
 
 #define NEW
 
+static connection_table *connections;
 
 int main(void){
 	int listen_socket;
@@ -40,7 +42,11 @@ int main(void){
 
 	//generate Slitheen ID using Telex tagging method
 	uint8_t slitheen_id[SLITHEEN_ID_LEN];
-	RAND_bytes(slitheen_id, SLITHEEN_ID_LEN);
+	uint8_t shared_secret[16];
+
+	generate_slitheen_id(slitheen_id, shared_secret);
+
+	//RAND_bytes(slitheen_id, SLITHEEN_ID_LEN);
 	printf("Randomly generated slitheen id: ");
 	int i;
 	for(i=0; i< SLITHEEN_ID_LEN; i++){
@@ -48,8 +54,15 @@ int main(void){
 	}
 	printf("\n");
 
+	printf("Shared secret: ");
+	for(i=0; i< 16; i++){
+		printf("%02x ", shared_secret[i]);
+	}
+	printf("\n");
+
+
 	// Calculate super encryption keys
-	generate_super_keys(slitheen_id);
+	generate_super_keys(shared_secret);
 
 	//b64 encode slitheen ID
 	char *encoded_bytes;
@@ -68,7 +81,7 @@ int main(void){
 	encoded_bytes = (*buffer_ptr).data;
 	encoded_bytes[(*buffer_ptr).length] = '\0';
 
-	printf("Encoded string is length %d, %s\n", (*buffer_ptr).length, encoded_bytes);
+	printf("Encoded string is length %zd, %s\n", (*buffer_ptr).length, encoded_bytes);
 
 	//give encoded slitheen ID to ous
 	struct sockaddr_in ous_addr;
@@ -194,97 +207,6 @@ int main(void){
 
 	return 0;
 }
-
-/*
- * Generate the keys for the super encryption layer, based on the slitheen ID
- */
-int generate_super_keys(uint8_t *secret){
-
-	super = calloc(1, sizeof(super_data));
-	
-	//need 2 encryption keys, 2 ivs, and a mac
-	//EVP_CIPHER_CTX *hdr_ctx;
-    //EVP_CIPHER_CTX *bdy_ctx;
-    EVP_MD_CTX *mac_ctx;
-
-    const EVP_MD *md = EVP_sha256();
-
-    /* Generate Keys */
-    uint8_t *hdr_key, *bdy_key;
-    uint8_t *mac_secret;
-    EVP_PKEY *mac_key;
-    int32_t mac_len, key_len;
-
-    key_len = EVP_CIPHER_key_length(EVP_aes_256_cbc());
-    mac_len = EVP_MD_size(md);
-    int32_t total_len = 2*key_len + mac_len;
-    uint8_t *key_block = calloc(1, total_len);
-
-    PRF(secret, SLITHEEN_SUPER_SECRET_SIZE,
-            (uint8_t *) SLITHEEN_SUPER_CONST, SLITHEEN_SUPER_CONST_SIZE,
-            NULL, 0,
-            NULL, 0,
-            NULL, 0,
-            key_block, total_len);
-
-//#ifdef DEBUG
-	int i;
-    printf("secret: \n");
-    for(i=0; i< SLITHEEN_SUPER_SECRET_SIZE; i++){
-        printf("%02x ", secret[i]);
-    }
-    printf("\n");
-    printf("keyblock: \n");
-    for(i=0; i< total_len; i++){
-        printf("%02x ", key_block[i]);
-    }
-    printf("\n");
-//#endif
-
-    hdr_key = key_block;
-    bdy_key = key_block + key_len;
-    mac_secret = key_block + 2*key_len;
-
-    /* Initialize Cipher Contexts */
-    //hdr_ctx = EVP_CIPHER_CTX_new();
-    //bdy_ctx = EVP_CIPHER_CTX_new();
-
-    //EVP_CipherInit_ex(hdr_ctx, EVP_aes_128_ecb(), NULL, hdr_key, NULL, 0);
-    //EVP_CipherInit_ex(bdy_ctx, EVP_aes_256_cbc(), NULL, bdy_key, bdy_iv, 0);
-
-    /* Initialize MAC Context */
-    mac_ctx = EVP_MD_CTX_create();
-
-    EVP_DigestInit_ex(mac_ctx, md, NULL);
-    mac_key = EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, NULL, mac_secret, mac_len);
-    EVP_DigestSignInit(mac_ctx, NULL, md, NULL, mac_key);
-
-    //super->header_ctx = hdr_ctx;
-    //super->body_ctx = bdy_ctx;
-	super->header_key = malloc(key_len);
-	super->body_key = malloc(key_len);
-	memcpy(super->header_key, hdr_key, key_len);
-	memcpy(super->body_key, bdy_key, key_len);
-    super->body_mac_ctx = mac_ctx;
-
-    //Free everything
-    free(key_block);
-    EVP_PKEY_free(mac_key);
-
-	return 0;
-}
-
-struct socks_method_req {
-	uint8_t version;
-	uint8_t num_methods;
-};
-
-struct socks_req {
-	uint8_t version;
-	uint8_t cmd;
-	uint8_t rsvd;
-	uint8_t addr_type;
-};
 
 //continuously read from the socket and look for a CONNECT message
 int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
@@ -891,99 +813,3 @@ void *demultiplex_data(){
 
 }
 
-int super_decrypt(uint8_t *data){
-
-	EVP_CIPHER_CTX *bdy_ctx;
-	EVP_CIPHER_CTX *hdr_ctx;
-
-	uint8_t *p = data;
-	int32_t out_len, len;
-	uint8_t output[EVP_MAX_MD_SIZE];
-	size_t mac_len;
-	int i;
-
-	//decrypt header
-#ifdef DEBUG
-	printf("Encrypted header:\n");
-	for(i=0; i< SLITHEEN_HEADER_LEN; i++){
-		printf("%02x ", p[i]);
-	}
-	printf("\n");
-#endif
-
-    hdr_ctx = EVP_CIPHER_CTX_new();
-
-    EVP_CipherInit_ex(hdr_ctx, EVP_aes_256_ecb(), NULL, super->header_key, NULL, 0);
-
-	if(!EVP_CipherUpdate(hdr_ctx, p, &out_len, p, SLITHEEN_HEADER_LEN)){
-		printf("Decryption failed!");
-		return 0;
-	}
-
-	EVP_CIPHER_CTX_free(hdr_ctx);
-
-	struct slitheen_hdr *sl_hdr = (struct slitheen_hdr *) p;
-	len = htons(sl_hdr->len);
-	if(!sl_hdr->len){//there are no data to be decrypted
-		return 1;
-	}
-
-	printf("Decrypted header (%d bytes):\n", SLITHEEN_HEADER_LEN);
-	for(i=0; i< SLITHEEN_HEADER_LEN; i++){
-		printf("%02x ", p[i]);
-	}
-	printf("\n");
-	fflush(stdout);
-	
-	p += SLITHEEN_HEADER_LEN;
-
-	//compute mac
-	EVP_DigestSignUpdate(super->body_mac_ctx, p, len);
-
-    EVP_DigestSignFinal(super->body_mac_ctx, output, &mac_len);
-
-#ifdef DEBUG
-	printf("Received mac:\n");
-	for(i=0; i< 16; i++){
-		printf("%02x ", p[len+i]);
-	}
-	printf("\n");
-	fflush(stdout);
-	if(memcmp(p+len, output, 16)){
-		printf("MAC verification failed\n");
-		return 0;
-	}
-#endif
-
-	//decrypt body
-    bdy_ctx = EVP_CIPHER_CTX_new();
-
-    EVP_CipherInit_ex(bdy_ctx, EVP_aes_256_cbc(), NULL, super->body_key, p, 0);
-
-	p+=16;//skip IV
-
-	printf("Encrypted data (%d bytes):\n", len);
-	for(i=0; i< len; i++){
-		printf("%02x ", p[i]);
-	}
-	printf("\n");
-
-	if(!EVP_CipherUpdate(bdy_ctx, p, &out_len, p, len+16)){
-		printf("Decryption failed!");
-		return 0;
-	}
-
-	EVP_CIPHER_CTX_free(bdy_ctx);
-
-	printf("Decrypted data (%d bytes):\n", out_len);
-	for(i=0; i< out_len; i++){
-		printf("%02x ", p[i]);
-	}
-	printf("\n");
-	fflush(stdout);
-
-	p += out_len;
-
-	return 1;
-
-}
