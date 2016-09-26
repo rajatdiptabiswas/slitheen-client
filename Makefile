@@ -4,7 +4,9 @@ TARGETS= socks
 
 all: $(TARGETS)
 
-socks: socks5proxy.c
+socks5proxy.o crypto.o:: socks5proxy.h crypto.h
+
+socks: socks5proxy.o crypto.o crypto.h socks5proxy.h
 	gcc -o $@ $^ -lpthread -lssl -lcrypto
 
 clean:

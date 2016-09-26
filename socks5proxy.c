@@ -16,63 +16,18 @@
 #include <netdb.h>
 #include <pthread.h>
 #include <fcntl.h>
+#include <arpa/inet.h>
 
 #include <openssl/bio.h>
 #include <openssl/evp.h>
 #include <openssl/buffer.h>
+#include <openssl/rand.h>
 
-#define SLITHEEN_ID_LEN 10
-#define SLITHEEN_SUPER_SECRET_SIZE 10
-#define SLITHEEN_SUPER_CONST "SLITHEEN_SUPER_ENCRYPT"
-#define SLITHEEN_SUPER_CONST_SIZE 22
+#include "socks5proxy.h"
+#include "crypto.h"
 
 #define NEW
 
-int proxy_data(int sockfd, uint16_t stream_id, int32_t pipefd);
-void *demultiplex_data();
-
-struct __attribute__ ((__packed__)) slitheen_hdr {
-	uint64_t counter;
-	uint16_t stream_id;
-	uint16_t len;
-	uint16_t garbage;
-	uint16_t zeros;
-};
-
-#define SLITHEEN_HEADER_LEN 16
-
-struct __attribute__ ((__packed__)) slitheen_up_hdr{
-	uint16_t stream_id;
-	uint16_t len;
-};
-
-typedef struct connection_st{
-	int32_t pipe_fd;
-	uint16_t stream_id;
-	struct connection_st *next;
-} connection;
-
-typedef struct connection_table_st{
-	connection *first;
-} connection_table;
-
-static connection_table *connections;
-
-typedef struct super_data_st {
-	//EVP_CIPHER_CTX *header_ctx;
-	//EVP_CIPHER_CTX *body_ctx;
-	uint8_t *header_key;
-	uint8_t *body_key;
-	EVP_MD_CTX *body_mac_ctx;
-} super_data;
-
-static super_data *super;
-
-typedef struct data_block_st {
-	uint64_t count;
-	uint8_t *data;
-	struct data_block_st *next;
-} data_block;
 
 int main(void){
 	int listen_socket;
@@ -97,7 +52,7 @@ int main(void){
 	generate_super_keys(slitheen_id);
 
 	//b64 encode slitheen ID
-	const char *encoded_bytes;
+	char *encoded_bytes;
 	BUF_MEM *buffer_ptr;
 	BIO *bio, *b64;
 	b64 = BIO_new(BIO_f_base64());
@@ -111,6 +66,9 @@ int main(void){
 	BIO_set_close(bio, BIO_NOCLOSE);
 	BIO_free_all(bio);
 	encoded_bytes = (*buffer_ptr).data;
+	encoded_bytes[(*buffer_ptr).length] = '\0';
+
+	printf("Encoded string is length %d, %s\n", (*buffer_ptr).length, encoded_bytes);
 
 	//give encoded slitheen ID to ous
 	struct sockaddr_in ous_addr;
@@ -129,10 +87,10 @@ int main(void){
 		printf("Error connecting\n");
 		return 1;
 	}
-	uint8_t *message = calloc(1, BUFSIZ);
+	char *message = calloc(1, BUFSIZ);
 	sprintf(message, "POST / HTTP/1.1\r\nContent-Length: %zd\r\n\r\n%s ", strlen(encoded_bytes), encoded_bytes);
 	int32_t bytes_sent = send(ous_in, message, strlen(message), 0);
-	printf("Wrote %d bytes to OUS_in: %s\n", bytes_sent, message);
+	printf("Wrote %d bytes to OUS_in:\n %s\n", bytes_sent, message);
 	free(message);
 
 	/* Spawn process to listen for incoming data from OUS 
@@ -237,87 +195,6 @@ int main(void){
 	return 0;
 }
 
-int PRF(uint8_t *secret, int32_t secret_len,
-        uint8_t *seed1, int32_t seed1_len,
-        uint8_t *seed2, int32_t seed2_len,
-        uint8_t *seed3, int32_t seed3_len,
-        uint8_t *seed4, int32_t seed4_len,
-        uint8_t *output, int32_t output_len){
-
-    EVP_MD_CTX ctx, ctx_tmp, ctx_init;
-    EVP_PKEY *mac_key;
-    const EVP_MD *md = EVP_sha256();
-
-    uint8_t A[EVP_MAX_MD_SIZE];
-    size_t len, A_len;
-    int chunk = EVP_MD_size(md);
-    int remaining = output_len;
-
-    uint8_t *out = output;
-
-    EVP_MD_CTX_init(&ctx);
-    EVP_MD_CTX_init(&ctx_tmp);
-    EVP_MD_CTX_init(&ctx_init);
-    EVP_MD_CTX_set_flags(&ctx_init, EVP_MD_CTX_FLAG_NON_FIPS_ALLOW);
-
-    mac_key = EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, NULL, secret, secret_len);
-
-    /* Calculate first A value */
-    EVP_DigestSignInit(&ctx_init, NULL, md, NULL, mac_key);
-    EVP_MD_CTX_copy_ex(&ctx, &ctx_init);
-    if(seed1 != NULL && seed1_len > 0){
-        EVP_DigestSignUpdate(&ctx, seed1, seed1_len);
-    }
-    if(seed2 != NULL && seed2_len > 0){
-        EVP_DigestSignUpdate(&ctx, seed2, seed2_len);
-    }
-    if(seed3 != NULL && seed3_len > 0){
-        EVP_DigestSignUpdate(&ctx, seed3, seed3_len);
-    }
-    if(seed4 != NULL && seed4_len > 0){
-        EVP_DigestSignUpdate(&ctx, seed4, seed4_len);
-    }
-    EVP_DigestSignFinal(&ctx, A, &A_len);
-
-    //iterate until desired length is achieved
-    while(remaining > 0){
-        /* Now compute SHA384(secret, A+seed) */
-        EVP_MD_CTX_copy_ex(&ctx, &ctx_init);
-        EVP_DigestSignUpdate(&ctx, A, A_len);
-        EVP_MD_CTX_copy_ex(&ctx_tmp, &ctx);
-        if(seed1 != NULL && seed1_len > 0){
-            EVP_DigestSignUpdate(&ctx, seed1, seed1_len);
-        }
-        if(seed2 != NULL && seed2_len > 0){
-            EVP_DigestSignUpdate(&ctx, seed2, seed2_len);
-        }
-        if(seed3 != NULL && seed3_len > 0){
-            EVP_DigestSignUpdate(&ctx, seed3, seed3_len);
-        }
-        if(seed4 != NULL && seed4_len > 0){
-            EVP_DigestSignUpdate(&ctx, seed4, seed4_len);
-        }
-
-        if(remaining > chunk){
-            EVP_DigestSignFinal(&ctx, out, &len);
-            out += len;
-            remaining -= len;
-
-            /* Next A value */
-            EVP_DigestSignFinal(&ctx_tmp, A, &A_len);
-        } else {
-            EVP_DigestSignFinal(&ctx, A, &A_len);
-            memcpy(out, A, remaining);
-            remaining -= remaining;
-        }
-    }
-    EVP_PKEY_free(mac_key);
-    EVP_MD_CTX_cleanup(&ctx);
-    EVP_MD_CTX_cleanup(&ctx_tmp);
-    EVP_MD_CTX_cleanup(&ctx_init);
-    OPENSSL_cleanse(A, sizeof(A));
-    return 0;
-}
 /*
  * Generate the keys for the super encryption layer, based on the slitheen ID
  */
@@ -333,16 +210,14 @@ int generate_super_keys(uint8_t *secret){
     const EVP_MD *md = EVP_sha256();
 
     /* Generate Keys */
-    uint8_t *hdr_key, *hdr_iv;
-    uint8_t *bdy_key, *bdy_iv;
+    uint8_t *hdr_key, *bdy_key;
     uint8_t *mac_secret;
     EVP_PKEY *mac_key;
-    int32_t mac_len, key_len, iv_len;
+    int32_t mac_len, key_len;
 
     key_len = EVP_CIPHER_key_length(EVP_aes_256_cbc());
-    iv_len = EVP_CIPHER_iv_length(EVP_aes_256_cbc());
     mac_len = EVP_MD_size(md);
-    int32_t total_len = 2*key_len + 2*iv_len + mac_len;
+    int32_t total_len = 2*key_len + mac_len;
     uint8_t *key_block = calloc(1, total_len);
 
     PRF(secret, SLITHEEN_SUPER_SECRET_SIZE,
@@ -368,9 +243,7 @@ int generate_super_keys(uint8_t *secret){
 
     hdr_key = key_block;
     bdy_key = key_block + key_len;
-    hdr_iv = key_block + 2*key_len;
-    bdy_iv = key_block + 2*key_len + iv_len;
-    mac_secret = key_block + 2*key_len + 2*iv_len;
+    mac_secret = key_block + 2*key_len;
 
     /* Initialize Cipher Contexts */
     //hdr_ctx = EVP_CIPHER_CTX_new();
@@ -560,7 +433,7 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 #endif
 
 #ifdef NEW
-	uint8_t *message = calloc(1, BUFSIZ);
+	char *message = calloc(1, BUFSIZ);
 	sprintf(message, "POST / HTTP/1.1\r\nContent-Length: %zd\r\n\r\n%s ", strlen(encoded_bytes)+1, encoded_bytes);
 	bytes_sent = send(ous_in, message, strlen(message), 0);
 	printf("Wrote %d bytes to OUS_in: %s\n", bytes_sent, message);
