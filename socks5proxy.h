@@ -39,6 +39,8 @@ typedef struct connection_table_st{
 typedef struct data_block_st {
 	uint64_t count;
 	uint8_t *data;
+        uint16_t len;
+        int32_t pipe_fd;
 	struct data_block_st *next;
 } data_block;
 

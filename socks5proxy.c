@@ -742,8 +742,10 @@ void *demultiplex_data(){
 					if(saved_data == NULL){
 						saved_data = malloc(sizeof(data_block));
 						saved_data->count = sl_hdr->counter;
-						saved_data->data = malloc(ntohs(sl_hdr->len));
-						memcpy(saved_data->data, p, ntohs(sl_hdr->len));
+                                                saved_data->len = ntohs(sl_hdr->len);
+						saved_data->data = malloc(saved_data->len);
+                                                memcpy(saved_data->data, p, saved_data->len);
+                                                saved_data->pipe_fd = pipe_fd;
 						saved_data->next = NULL;
 					} else {
 						data_block *last = saved_data;
@@ -752,8 +754,10 @@ void *demultiplex_data(){
 						}
 						data_block *new_block = malloc(sizeof(data_block));
 						new_block->count = sl_hdr->counter;
+                                                new_block->len = ntohs(sl_hdr->len);
 						new_block->data = malloc(ntohs(sl_hdr->len));
 						memcpy(new_block->data, p, ntohs(sl_hdr->len));
+                                                new_block->pipe_fd = pipe_fd;
 						new_block->next = NULL;
 
 						last->next = new_block;
@@ -776,7 +780,8 @@ void *demultiplex_data(){
 							(expected_next_count == current_block->count)){
 						printf("Writing out saved data with count %ld\n",
 								expected_next_count);
-						int32_t bytes_sent = write(pipe_fd, p, ntohs(sl_hdr->len));
+						int32_t bytes_sent = write(current_block->pipe_fd,
+                                                    current_block->data, current_block->len);
 						if(bytes_sent <= 0){
 							printf("Error reading to pipe for stream id %d\n",
 									sl_hdr->stream_id);
