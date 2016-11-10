@@ -27,8 +27,6 @@
 #include "crypto.h"
 #include "tagging.h"
 
-#define NEW
-
 static connection_table *connections;
 
 int main(void){
@@ -54,13 +52,6 @@ int main(void){
 	}
 	printf("\n");
 
-	printf("Shared secret: ");
-	for(i=0; i< 16; i++){
-		printf("%02x ", shared_secret[i]);
-	}
-	printf("\n");
-
-
 	// Calculate super encryption keys
 	generate_super_keys(shared_secret);
 
@@ -80,8 +71,6 @@ int main(void){
 	BIO_free_all(bio);
 	encoded_bytes = (*buffer_ptr).data;
 	encoded_bytes[(*buffer_ptr).length] = '\0';
-
-	printf("Encoded string is length %zd, %s\n", (*buffer_ptr).length, encoded_bytes);
 
 	//give encoded slitheen ID to ous
 	struct sockaddr_in ous_addr;
@@ -177,12 +166,9 @@ int main(void){
 		if(connections->first == NULL){
 			connections->first = new_conn;
 			printf("Added first connection with id: %d\n", new_conn->stream_id);
-			printf("Connection table (%p) has entry %p\n", connections, connections->first);
 			fflush(stdout);
 		} else {
 			connection *last = connections->first;
-			printf("New incoming connection\n");
-			fflush(stdout);
 			while(last->next != NULL){
 				last = last->next;
 			}
@@ -195,8 +181,6 @@ int main(void){
 		if(pid == 0){ //child
 
 			close(listen_socket);
-			printf("demux reads from pipe fd %d", pipefd[1]);
-			fflush(stdout);
 			proxy_data(new_socket, new_conn->stream_id, pipefd[0]);
 			exit(0);
 		}
@@ -212,8 +196,8 @@ int main(void){
 int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 	uint8_t *buffer = calloc(1, BUFSIZ);
 	uint8_t *response = calloc(1, BUFSIZ);
-	printf("ous out pipe fd: %d\n", ous_out);
-		fflush(stdout);
+
+	int32_t i;
 	
 	int bytes_read = recv(sockfd, buffer, BUFSIZ-1, 0);
 	if (bytes_read < 0){
@@ -222,13 +206,15 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 		goto err;
 	}
 
+#ifdef DEBUG
 	printf("Received %d bytes (id %d):\n", bytes_read, stream_id);
 	int i;
 	for(i=0; i< bytes_read; i++){
 		printf("%02x ", buffer[i]);
 	}
 	printf("\n");
-		fflush(stdout);
+	fflush(stdout);
+#endif
 
 	//Respond to methods negotiation
 	struct socks_method_req *clnt_meth = (struct socks_method_req *) buffer;
@@ -237,6 +223,7 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 	if(clnt_meth->version != 0x05){
 		printf("Client supplied invalid version: %02x\n", clnt_meth->version);
 		fflush(stdout);
+		goto err;
 	}
 
 	int responded = 0;
@@ -265,12 +252,14 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 		goto err;
 	}
 
+#ifdef DEBUG
 	printf("Received %d bytes (id %d):\n", bytes_read, stream_id);
 	for(i=0; i< bytes_read; i++){
 		printf("%02x ", buffer[i]);
 	}
 	printf("\n");
-		fflush(stdout);
+	fflush(stdout);
+#endif
 
 	//Now respond
 	response[0] = 0x05;
@@ -291,12 +280,14 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 		goto err;
 	}
 
+#ifdef DEBUG_UPSTREAM
 	printf("Received %d bytes (id %d):\n", bytes_read, stream_id);
 	for(i=0; i< bytes_read; i++){
 		printf("%02x ", buffer[i]);
 	}
 	printf("\n");
 	fflush(stdout);
+#endif
 
 	//pre-pend stream_id and length
 	memmove(buffer+sizeof(struct slitheen_up_hdr), buffer, bytes_read+1);
@@ -323,7 +314,6 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 	BIO_free_all(bio);
 	encoded_bytes = (*buffer_ptr).data;
 
-#ifdef NEW
 	struct sockaddr_in ous_addr;
 	ous_addr.sin_family = AF_INET;
 	inet_pton(AF_INET, "127.0.0.1", &(ous_addr.sin_addr));
@@ -332,39 +322,23 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 	int32_t ous_in = socket(AF_INET, SOCK_STREAM, 0);
 	if(ous_in < 0){
 		printf("Failed to make ous_in socket\n");
-		return 1;
+		goto err;
 	}
 
 	int32_t error = connect(ous_in, (struct sockaddr *) &ous_addr, sizeof (struct sockaddr));
 	if(error < 0){
 		printf("Error connecting\n");
-		return 1;
-	}
-#endif
-
-	//send connect request to OUS
-#ifdef OLD
-	int ous_in = open("OUS_in", O_CREAT | O_WRONLY, 0666);
-	if(ous_in < 0){
-		printf("Error opening file OUS_in\n");
-		fflush(stdout);
 		goto err;
 	}
 
-	lseek(ous_in, 0, SEEK_END);
-#endif
-
-#ifdef NEW
 	char *message = calloc(1, BUFSIZ);
 	sprintf(message, "POST / HTTP/1.1\r\nContent-Length: %zd\r\n\r\n%s ", strlen(encoded_bytes)+1, encoded_bytes);
 	bytes_sent = send(ous_in, message, strlen(message), 0);
+
+#ifdef DEBUG_UPSTREAM
 	printf("Wrote %d bytes to OUS_in: %s\n", bytes_sent, message);
 #endif
 
-#ifdef OLD
-	bytes_sent = write(ous_in, encoded_bytes, strlen(encoded_bytes));
-	bytes_sent += write(ous_in, " ", 1);
-#endif
 	if(bytes_sent < 0){
 		printf("Error writing to websocket\n");
 		fflush(stdout);
@@ -374,11 +348,15 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 	}
 
 	p = buffer+sizeof(struct slitheen_up_hdr);
+
+#ifdef DEBUG_UPSTREAM
 	for(i=0; i< bytes_read; i++){
 		printf("%02x ", p[i]);
 	}
 	printf("\n");
-		fflush(stdout);
+	fflush(stdout);
+#endif
+
 	struct socks_req *clnt_req = (struct socks_req *) p;
 	p += 4;
 
@@ -388,8 +366,6 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 		fflush(stdout);
 		goto err;
 	}
-	printf("Received a connect request from stream id %d\n", stream_id);
-		fflush(stdout);
 
 	//now select on pipe (for downstream data) and the socket (for upstream data)
 	for(;;){
@@ -398,11 +374,6 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 		fd_set writefds;
 
 		int32_t nfds = (sockfd > ous_out) ? sockfd +1 : ous_out + 1;
-		//if(sockfd > ous_out){
-		//	nfds = (sockfd > ous_in) ? sockfd +1 : ous_in + 1;
-		//} else {
-		//	nfds = (ous_out > ous_in) ? ous_out +1 : ous_in + 1;
-		//}
 
 		FD_ZERO(&readfds);
 		FD_ZERO(&writefds);
@@ -410,11 +381,10 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 		FD_SET(sockfd, &readfds);
 		FD_SET(ous_out, &readfds);
 		FD_SET(sockfd, &writefds);
-		//FD_SET(ous_in, &writefds);
 
 		if(select(nfds, &readfds, &writefds, NULL, NULL) <0){
 			printf("Select error\n");
-		fflush(stdout);
+			fflush(stdout);
 			continue;
 		}
 
@@ -423,7 +393,7 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 			bytes_read = recv(sockfd, buffer, BUFSIZ-1, 0);
 			if (bytes_read < 0){
 				printf("Error reading from socket (in for loop)\n");
-		fflush(stdout);
+				fflush(stdout);
 				goto err;
 			}
 			if(bytes_read == 0){
@@ -447,9 +417,10 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 				BIO_free_all(bio);
 				encoded_bytes = (*buffer_ptr).data;
 				ous_in = socket(AF_INET, SOCK_STREAM, 0);
+
 				if(ous_in < 0){
 					printf("Failed to make ous_in socket\n");
-				fflush(stdout);
+					fflush(stdout);
 					goto err;
 				}
 
@@ -460,7 +431,8 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 					goto err;
 				}
 
-				sprintf(message, "POST / HTTP/1.1\r\nContent-Length: %zd\r\n\r\n%s ", strlen(encoded_bytes)+1, encoded_bytes);
+				sprintf(message, "POST / HTTP/1.1\r\nContent-Length: %zd\r\n\r\n%s ",
+						strlen(encoded_bytes)+1, encoded_bytes);
 				bytes_sent = send(ous_in, message, strlen(message), 0);
 				close(ous_in);
 
@@ -470,13 +442,16 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 
 			if(bytes_read > 0){
 
+#ifdef DEBUG_UPSTREAM
 				printf("Received %d data bytes from sockfd (id %d):\n", bytes_read, stream_id);
 				for(i=0; i< bytes_read; i++){
 					printf("%02x ", buffer[i]);
 				}
 				printf("\n");
 				printf("%s\n", buffer);
-		fflush(stdout);
+				fflush(stdout);
+#endif
+
 				memmove(buffer+sizeof(struct slitheen_up_hdr), buffer, bytes_read);
 
 				up_hdr = (struct slitheen_up_hdr *) buffer;
@@ -489,8 +464,6 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 				b64 = BIO_new(BIO_f_base64());
 				bio = BIO_push(b64, bio);
 
-				printf("HERE\n");
-				fflush(stdout);
 				BIO_set_flags(bio, BIO_FLAGS_BASE64_NO_NL);
 				BIO_write(bio, buffer, bytes_read);
 				BIO_flush(bio);
@@ -499,18 +472,6 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 				BIO_free_all(bio);
 				encoded_bytes = (*buffer_ptr).data;
 				
-#ifdef OLD
-				int ous_in = open("OUS_in", O_CREAT | O_WRONLY, 0666);
-				if(ous_in < 0){
-					printf("Error opening file OUS_in\n");
-					fflush(stdout);
-					goto err;
-				}
-
-				lseek(ous_in, 0, SEEK_END);
-#endif
-
-#ifdef NEW
 				ous_in = socket(AF_INET, SOCK_STREAM, 0);
 				if(ous_in < 0){
 					printf("Failed to make ous_in socket\n");
@@ -523,51 +484,51 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 					return 1;
 				}
 
-				sprintf(message, "POST / HTTP/1.1\r\nContent-Length: %zd\r\n\r\n%s ", strlen(encoded_bytes)+1, encoded_bytes);
+				sprintf(message, "POST / HTTP/1.1\r\nContent-Length: %zd\r\n\r\n%s ",
+						strlen(encoded_bytes)+1, encoded_bytes);
 				bytes_sent = send(ous_in, message, strlen(message), 0);
+
+#ifdef DEBUG_UPSTREAM
 				printf("Sent to OUS (%d bytes):%s\n",bytes_sent, message);
+#endif
 				close(ous_in);
 
-#endif
 
-#ifdef OLD
-				bytes_sent = write(ous_in, encoded_bytes, strlen(encoded_bytes));
-				bytes_sent += write(ous_in, " ", 1);
-				printf("Sent to OUS (%d bytes):%s\n",bytes_sent, encoded_bytes);
-				close(ous_in);
-#endif
 			}
 		} else if(FD_ISSET(ous_out, &readfds) && FD_ISSET(sockfd, &writefds)){
 
 			bytes_read = read(ous_out, buffer, BUFSIZ-1);
 			if (bytes_read <= 0){
 				printf("Error reading from ous_out (in for loop)\n");
-		fflush(stdout);
+				fflush(stdout);
 				goto err;
 			}
 
 			if(bytes_read > 0){
 
+#ifdef DEBUG_DOWNSTREAM
 				printf("Stream id %d received %d bytes from ous_out:\n", stream_id, bytes_read);
 				for(i=0; i< bytes_read; i++){
 					printf("%02x ", buffer[i]);
 				}
 				printf("\n");
 				printf("%s\n", buffer);
-		fflush(stdout);
+				fflush(stdout);
+#endif
 
 				bytes_sent = send(sockfd, buffer, bytes_read, 0);
 				if(bytes_sent <= 0){
 					printf("Error sending bytes to browser for stream id %d\n", stream_id);
 				}
 				
+#ifdef DEBUG_DOWNSTREAM
 				printf("Sent to browser (%d bytes from stream id %d):\n", bytes_sent, stream_id);
 				for(i=0; i< bytes_sent; i++){
 					printf("%02x ", buffer[i]);
 				}
 				printf("\n");
-		fflush(stdout);
-
+				fflush(stdout);
+#endif
 			}
 		}
 	}
@@ -590,9 +551,9 @@ void *demultiplex_data(){
 	uint8_t *buffer = calloc(1, buffer_len);
 	uint8_t *p;
 
-	printf("Opening OUS_out\n");
+	printf("Opening OUS_out... ");
 	int32_t ous_fd = open("OUS_out", O_RDONLY);
-	printf("Opened.\n");
+	printf("done.\n");
 	uint8_t *partial_block;
 	uint32_t partial_block_len = 0;
 	uint32_t resource_remaining = 0;
@@ -604,7 +565,6 @@ void *demultiplex_data(){
 		
 		if(bytes_read > 0){
 			int32_t bytes_remaining = bytes_read;
-			//printf("Read in %d bytes from OUS_out\n", bytes_remaining);
 			p = buffer;
 
 			//the first value for a new resource will be the resource length,
@@ -643,18 +603,20 @@ void *demultiplex_data(){
 			while(bytes_remaining > 0){
 
 				if(bytes_remaining + resource_remaining < SLITHEEN_HEADER_LEN){
-					printf("Resource is padded out with garbage\n");
 					bytes_remaining = 0;
 					break;
 				}
 
 				if((bytes_remaining < SLITHEEN_HEADER_LEN)){
+
+#ifdef DEBUG_PARSE
 					printf("Partial header: ");
 					int i;
 					for(i = 0; i< bytes_remaining; i++){
 						printf("%02x ", p[i]);
 					}
 					printf("\n");
+#endif
 
 					partial_block = calloc(1, bytes_remaining);
 					memcpy(partial_block, p, bytes_remaining);
@@ -667,7 +629,7 @@ void *demultiplex_data(){
 
 				struct slitheen_hdr *sl_hdr = (struct slitheen_hdr *) p;
 				//first see if sl_hdr corresponds to a valid stream. If not, ignore rest of read bytes
-#ifdef DEBUG
+#ifdef DEBUG_PARSE
 				printf("Slitheen header:\n");
 				int i;
 				for(i = 0; i< SLITHEEN_HEADER_LEN; i++){
@@ -678,7 +640,6 @@ void *demultiplex_data(){
 
 
 				if(ntohs(sl_hdr->len) > bytes_remaining){
-					printf("Received partial block\n");
 					partial_block = calloc(1, ntohs(sl_hdr->len));
 					memcpy(partial_block, p, bytes_remaining);
 					partial_block_len = bytes_remaining;
@@ -690,7 +651,8 @@ void *demultiplex_data(){
 				bytes_remaining -= SLITHEEN_HEADER_LEN;
 
 				if((!sl_hdr->len) && (sl_hdr->garbage)){
-#ifdef DEBUG
+
+#ifdef DEBUG_PARSE
 					printf("%d Garbage bytes\n", ntohs(sl_hdr->garbage));
 #endif
 					p += ntohs(sl_hdr->garbage);
@@ -700,20 +662,16 @@ void *demultiplex_data(){
 
 				int32_t pipe_fd =-1;
 				if(connections->first == NULL){
-					printf("There are no connections\n");
+					printf("Error: there are no connections\n");
 				} else {
 					connection *last = connections->first;
 					if (last->stream_id == sl_hdr->stream_id){
-						printf("Found stream id %d!\n", sl_hdr->stream_id);
 						pipe_fd = last->pipe_fd;
-						printf("Pipe fd: %d\n", pipe_fd);
 					}
 					while(last->next != NULL){
 						last = last->next;
 						if (last->stream_id == sl_hdr->stream_id){
-							printf("Found stream id %d!\n", sl_hdr->stream_id);
 							pipe_fd = last->pipe_fd;
-							printf("Pipe fd: %d\n", pipe_fd);
 						}
 					}
 				}
@@ -723,15 +681,15 @@ void *demultiplex_data(){
 					break;
 				}
 				
+#ifdef DEBUG_PARSE
 				printf("Received information for stream id: %d of length: %u\n", sl_hdr->stream_id, ntohs(sl_hdr->len));
+#endif
 
 				//figure out how much to skip
-				
 				int32_t padding = 0;
 				if(ntohs(sl_hdr->len) %16){
 					padding = 16 - ntohs(sl_hdr->len)%16;
 				}
-					
 				p += 16; //IV
 
 				//check counter to see if we are missing data
@@ -778,8 +736,6 @@ void *demultiplex_data(){
 					data_block *current_block = saved_data;
 					while((current_block != NULL) &&
 							(expected_next_count == current_block->count)){
-						printf("Writing out saved data with count %ld\n",
-								expected_next_count);
 						int32_t bytes_sent = write(current_block->pipe_fd,
                                                     current_block->data, current_block->len);
 						if(bytes_sent <= 0){
@@ -797,19 +753,17 @@ void *demultiplex_data(){
 				p += 16; //mac
 				p += padding;
 				p += ntohs(sl_hdr->garbage);
-				printf("Skipped %d garbage bytes\n", ntohs(sl_hdr->garbage));
-				fflush(stdout);
+
 				bytes_remaining -= 
 					ntohs(sl_hdr->len) + 16 + padding + 16 + ntohs(sl_hdr->garbage);
-				printf("Bytes remaining: %d, padding: %d\n", bytes_remaining, padding);
 			}
 
 		} else {
 			printf("Error: read %d bytes from OUS_out\n", bytes_read);
-			printf("Opening OUS_out\n");
+			printf("Re-opening OUS_out... ");
 			close(ous_fd);
 			ous_fd = open("OUS_out", O_RDONLY);
-			printf("Opened.\n");
+			printf("done.\n");
 		}
 		
 	}

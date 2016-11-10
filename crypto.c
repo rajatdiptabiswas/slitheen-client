@@ -122,7 +122,7 @@ int generate_super_keys(uint8_t *secret){
             NULL, 0,
             key_block, total_len);
 
-//#ifdef DEBUG
+#ifdef DEBUG
 	int i;
     printf("secret: \n");
     for(i=0; i< SLITHEEN_SUPER_SECRET_SIZE; i++){
@@ -134,7 +134,7 @@ int generate_super_keys(uint8_t *secret){
         printf("%02x ", key_block[i]);
     }
     printf("\n");
-//#endif
+#endif
 
     hdr_key = key_block;
     bdy_key = key_block + key_len;
@@ -194,63 +194,90 @@ int super_decrypt(uint8_t *data){
 
 	struct slitheen_hdr *sl_hdr = (struct slitheen_hdr *) p;
 	len = htons(sl_hdr->len);
+
 	if(!sl_hdr->len){//there are no data to be decrypted
 		return 1;
 	}
 
+	if(len %16){ //add padding to len
+		len += 16 - len%16;
+	}
+
+
+//#ifdef DEBUG_PARSE
 	printf("Decrypted header (%d bytes):\n", SLITHEEN_HEADER_LEN);
 	for(i=0; i< SLITHEEN_HEADER_LEN; i++){
 		printf("%02x ", p[i]);
 	}
 	printf("\n");
 	fflush(stdout);
+//#endif
 	
 	p += SLITHEEN_HEADER_LEN;
 
+	//initialize body cipher context with IV
+    bdy_ctx = EVP_CIPHER_CTX_new();
+    EVP_CipherInit_ex(bdy_ctx, EVP_aes_256_cbc(), NULL, super->body_key, p, 0);
+	p+=16;
+
 	//compute mac
-	EVP_DigestSignUpdate(super->body_mac_ctx, p, len);
+	EVP_MD_CTX mac_ctx;
+	EVP_MD_CTX_init(&mac_ctx);
+	EVP_MD_CTX_copy_ex(&mac_ctx, super->body_mac_ctx);
 
-    EVP_DigestSignFinal(super->body_mac_ctx, output, &mac_len);
+	EVP_DigestSignUpdate(&mac_ctx, p, len);
 
-#ifdef DEBUG
+    EVP_DigestSignFinal(&mac_ctx, output, &mac_len);
+
+	EVP_MD_CTX_cleanup(&mac_ctx);
+
+#ifdef DEBUG_PARSE
 	printf("Received mac:\n");
 	for(i=0; i< 16; i++){
 		printf("%02x ", p[len+i]);
 	}
 	printf("\n");
 	fflush(stdout);
+#endif
+
+#ifdef DEBUG_PARSE
+	printf("Computed mac:\n");
+	for(i=0; i< 16; i++){
+		printf("%02x ", output[i]);
+	}
+	printf("\n");
+	fflush(stdout);
+#endif
+
 	if(memcmp(p+len, output, 16)){
 		printf("MAC verification failed\n");
 		return 0;
 	}
-#endif
 
 	//decrypt body
-    bdy_ctx = EVP_CIPHER_CTX_new();
-
-    EVP_CipherInit_ex(bdy_ctx, EVP_aes_256_cbc(), NULL, super->body_key, p, 0);
-
-	p+=16;//skip IV
-
+#ifdef DEBUG_PARSE
 	printf("Encrypted data (%d bytes):\n", len);
 	for(i=0; i< len; i++){
 		printf("%02x ", p[i]);
 	}
 	printf("\n");
+#endif
 
-	if(!EVP_CipherUpdate(bdy_ctx, p, &out_len, p, len+16)){
+	if(!EVP_CipherUpdate(bdy_ctx, p, &out_len, p, len)){
 		printf("Decryption failed!");
 		return 0;
 	}
 
 	EVP_CIPHER_CTX_free(bdy_ctx);
 
+#ifdef DEBUG_PARSE
 	printf("Decrypted data (%d bytes):\n", out_len);
 	for(i=0; i< out_len; i++){
 		printf("%02x ", p[i]);
 	}
 	printf("\n");
 	fflush(stdout);
+#endif
 
 	p += out_len;
 
