@@ -113,6 +113,7 @@ int main(void){
 		return 1;
 	}
 
+
 	address.sin_family = AF_INET;
 	address.sin_addr.s_addr = INADDR_ANY;
 	address.sin_port = htons(1080);
@@ -554,7 +555,7 @@ void *demultiplex_data(){
 	printf("Opening OUS_out... ");
 	int32_t ous_fd = open("OUS_out", O_RDONLY);
 	printf("done.\n");
-	uint8_t *partial_block;
+	uint8_t *partial_block = NULL;
 	uint32_t partial_block_len = 0;
 	uint32_t resource_remaining = 0;
 	uint64_t expected_next_count = 1;
@@ -567,47 +568,53 @@ void *demultiplex_data(){
 			int32_t bytes_remaining = bytes_read;
 			p = buffer;
 
-			//the first value for a new resource will be the resource length,
-			//followed by a newline
-			if(resource_remaining > 0){
-				resource_remaining -= bytes_remaining;
-
-				if((bytes_remaining > 0) && (partial_block_len > 0)){
-					//process first part of slitheen info
-					memmove(buffer+partial_block_len, buffer, bytes_read);
-					memcpy(buffer, partial_block, partial_block_len);
-					bytes_remaining += partial_block_len;
-					free(partial_block);
-					partial_block_len = 0;
-				}
-
-			} else {
-				uint8_t *end_ptr;
-				resource_remaining = strtol((const char *) p, (char **) &end_ptr, 10);
-				if(resource_remaining == 0){
-					printf("UH OH, resource_remaining is zero or there was an error O.o\n");
-				} else {
-					bytes_remaining -= (end_ptr - p) + 1;
-					p += (end_ptr - p) + 1;
-
-					if(resource_remaining < bytes_remaining){
-						resource_remaining = 0;
-						printf("UH OH, shouldn't be here\n");
-					} else {
-						resource_remaining -= bytes_remaining;
-					}
-				}
+			//didn't read a full slitheen block last time
+			if(partial_block_len > 0){
+				//process first part of slitheen info
+				memmove(buffer+partial_block_len, buffer, bytes_read);
+				memcpy(buffer, partial_block, partial_block_len);
+				bytes_remaining += partial_block_len;
+				free(partial_block);
+				partial_block = NULL;
+				partial_block_len = 0;
 			}
-			
 
 			while(bytes_remaining > 0){
+				if(resource_remaining <= 0){//we're at a new resource
+					//the first value for a new resource will be the resource length,
+					//followed by a newline
+					uint8_t *end_ptr;
+					resource_remaining = strtol((const char *) p, (char **) &end_ptr, 10);
+#ifdef DEBUG_PARSE
+					printf("Starting new resource of len %d bytes\n", resource_remaining);
+					printf("Resource len bytes:\n");
+					int i;
+					for(i=0; i< (end_ptr - p) + 1; i++){
+						printf("%02x ", ((const char *) p)[i]);
+					}
+					printf("\n");
+#endif
+					if(resource_remaining == 0){
+						bytes_remaining -= (end_ptr - p) + 1;
+						p += (end_ptr - p) + 1;
+					} else {
+						bytes_remaining -= (end_ptr - p) + 1;
+						p += (end_ptr - p) + 1;
 
-				if(bytes_remaining + resource_remaining < SLITHEEN_HEADER_LEN){
+					}
+					continue;
+
+				}
+
+
+				if(resource_remaining < SLITHEEN_HEADER_LEN){
+					printf("ERROR: Resource remaining doesn't fit header len.\n");
+					resource_remaining = 0;
 					bytes_remaining = 0;
 					break;
 				}
 
-				if((bytes_remaining < SLITHEEN_HEADER_LEN)){
+				if(bytes_remaining < SLITHEEN_HEADER_LEN){
 
 #ifdef DEBUG_PARSE
 					printf("Partial header: ");
@@ -618,6 +625,7 @@ void *demultiplex_data(){
 					printf("\n");
 #endif
 
+					if(partial_block != NULL) printf("UH OH (PB)\n");
 					partial_block = calloc(1, bytes_remaining);
 					memcpy(partial_block, p, bytes_remaining);
 					partial_block_len = bytes_remaining;
@@ -625,30 +633,46 @@ void *demultiplex_data(){
 					break;
 				}
 
-				super_decrypt(p);
+				//decrypt header to see if we have entire block
+				uint8_t *tmp_header = malloc(SLITHEEN_HEADER_LEN);
+				memcpy(tmp_header, p, SLITHEEN_HEADER_LEN);
+				peek_header(tmp_header);
 
-				struct slitheen_hdr *sl_hdr = (struct slitheen_hdr *) p;
+				struct slitheen_hdr *sl_hdr = (struct slitheen_hdr *) tmp_header;
 				//first see if sl_hdr corresponds to a valid stream. If not, ignore rest of read bytes
 #ifdef DEBUG_PARSE
 				printf("Slitheen header:\n");
 				int i;
 				for(i = 0; i< SLITHEEN_HEADER_LEN; i++){
-					printf("%02x ", p[i]);
+					printf("%02x ", tmp_header[i]);
 				}
 				printf("\n");
 #endif
-
-
-				if(ntohs(sl_hdr->len) > bytes_remaining){
-					partial_block = calloc(1, ntohs(sl_hdr->len));
-					memcpy(partial_block, p, bytes_remaining);
-					partial_block_len = bytes_remaining;
+				if(ntohs(sl_hdr->len) > resource_remaining){
+					printf("ERROR: slitheen block doesn't fit in resource remaining!\n");
+					resource_remaining = 0;
 					bytes_remaining = 0;
 					break;
 				}
 
+				if(ntohs(sl_hdr->len) > bytes_remaining){
+					if(partial_block != NULL) printf("UH OH (PB)\n");
+					partial_block = calloc(1, ntohs(sl_hdr->len));
+					memcpy(partial_block, p, bytes_remaining);
+					partial_block_len = bytes_remaining;
+					bytes_remaining = 0;
+					free(tmp_header);
+					break;
+				}
+
+				super_decrypt(p);
+
+				sl_hdr = (struct slitheen_hdr *) p;
+				free(tmp_header);
+
 				p += SLITHEEN_HEADER_LEN;
 				bytes_remaining -= SLITHEEN_HEADER_LEN;
+				resource_remaining -= SLITHEEN_HEADER_LEN;
 
 				if((!sl_hdr->len) && (sl_hdr->garbage)){
 
@@ -657,6 +681,7 @@ void *demultiplex_data(){
 #endif
 					p += ntohs(sl_hdr->garbage);
 					bytes_remaining -= ntohs(sl_hdr->garbage);
+					resource_remaining -= ntohs(sl_hdr->garbage);
 					continue;
 				}
 
@@ -744,6 +769,7 @@ void *demultiplex_data(){
 						}
 						expected_next_count++;
 						saved_data = current_block->next;
+						free(current_block->data);
 						free(current_block);
 						current_block = saved_data;
 					}
@@ -756,6 +782,9 @@ void *demultiplex_data(){
 
 				bytes_remaining -= 
 					ntohs(sl_hdr->len) + 16 + padding + 16 + ntohs(sl_hdr->garbage);
+				resource_remaining -= 
+					ntohs(sl_hdr->len) + 16 + padding + 16 + ntohs(sl_hdr->garbage);
+
 			}
 
 		} else {
@@ -767,7 +796,7 @@ void *demultiplex_data(){
 		}
 		
 	}
-
+	free(buffer);
 	close(ous_fd);
 
 }

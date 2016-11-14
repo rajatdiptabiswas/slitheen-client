@@ -15,6 +15,7 @@ int PRF(uint8_t *secret, int32_t secret_len,
 		uint8_t *seed4, int32_t seed4_len,
 		uint8_t *output, int32_t output_len);
 
+int peek_header(uint8_t *data);
 int super_decrypt(uint8_t *data);
 int generate_super_keys(uint8_t *secret);
 

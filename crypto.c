@@ -89,6 +89,12 @@ int PRF(uint8_t *secret, int32_t secret_len,
 			remaining -= remaining;
 		}
 	}
+
+	EVP_PKEY_free(mac_key);
+
+	EVP_MD_CTX_cleanup(&ctx);
+	EVP_MD_CTX_cleanup(&ctx_tmp);
+	EVP_MD_CTX_cleanup(&ctx_init);
 	return 1;
 }
 
@@ -161,16 +167,72 @@ int generate_super_keys(uint8_t *secret){
 	return 0;
 }
 
+int peek_header(uint8_t *data){
+
+	EVP_CIPHER_CTX *hdr_ctx = NULL;
+
+	int32_t out_len;
+	uint8_t *p = data;
+	int retval = 1;
+
+	//decrypt header
+#ifdef DEBUG
+	int i;
+	printf("Encrypted header:\n");
+	for(i=0; i< SLITHEEN_HEADER_LEN; i++){
+		printf("%02x ", p[i]);
+	}
+	printf("\n");
+#endif
+
+    hdr_ctx = EVP_CIPHER_CTX_new();
+
+    EVP_CipherInit_ex(hdr_ctx, EVP_aes_256_ecb(), NULL, super->header_key, NULL, 0);
+
+	if(!EVP_CipherUpdate(hdr_ctx, p, &out_len, p, SLITHEEN_HEADER_LEN)){
+		printf("Decryption failed!");
+		retval =  0;
+		goto end;
+	}
+
+	struct slitheen_hdr *sl_hdr = (struct slitheen_hdr *) p;
+
+	if(!sl_hdr->len){//there are no data to be decrypted
+		retval =  1;
+		goto end;
+	}
+
+#ifdef DEBUG_PARSE
+	printf("Decrypted header (%d bytes):\n", SLITHEEN_HEADER_LEN);
+	for(i=0; i< SLITHEEN_HEADER_LEN; i++){
+		printf("%02x ", p[i]);
+	}
+	printf("\n");
+	fflush(stdout);
+#endif
+
+	retval = 1;
+
+end:
+	if(hdr_ctx != NULL){
+		EVP_CIPHER_CTX_cleanup(hdr_ctx);
+		OPENSSL_free(hdr_ctx);
+	}
+
+	return retval;
+
+}
+
 int super_decrypt(uint8_t *data){
 
-	EVP_CIPHER_CTX *bdy_ctx;
-	EVP_CIPHER_CTX *hdr_ctx;
+	EVP_CIPHER_CTX *bdy_ctx = NULL;
+	EVP_CIPHER_CTX *hdr_ctx = NULL;
 
 	uint8_t *p = data;
 	int32_t out_len, len;
 	uint8_t output[EVP_MAX_MD_SIZE];
 	size_t mac_len;
-	int i;
+	int i, retval = 1;
 
 	//decrypt header
 #ifdef DEBUG
@@ -187,16 +249,16 @@ int super_decrypt(uint8_t *data){
 
 	if(!EVP_CipherUpdate(hdr_ctx, p, &out_len, p, SLITHEEN_HEADER_LEN)){
 		printf("Decryption failed!");
-		return 0;
+		retval =  0;
+		goto end;
 	}
-
-	EVP_CIPHER_CTX_free(hdr_ctx);
 
 	struct slitheen_hdr *sl_hdr = (struct slitheen_hdr *) p;
 	len = htons(sl_hdr->len);
 
 	if(!sl_hdr->len){//there are no data to be decrypted
-		return 1;
+		retval =  1;
+		goto end;
 	}
 
 	if(len %16){ //add padding to len
@@ -251,7 +313,8 @@ int super_decrypt(uint8_t *data){
 
 	if(memcmp(p+len, output, 16)){
 		printf("MAC verification failed\n");
-		return 0;
+		retval =  0;
+		goto end;
 	}
 
 	//decrypt body
@@ -265,10 +328,9 @@ int super_decrypt(uint8_t *data){
 
 	if(!EVP_CipherUpdate(bdy_ctx, p, &out_len, p, len)){
 		printf("Decryption failed!");
-		return 0;
+		retval =  0;
+		goto end;
 	}
-
-	EVP_CIPHER_CTX_free(bdy_ctx);
 
 #ifdef DEBUG_PARSE
 	printf("Decrypted data (%d bytes):\n", out_len);
@@ -281,7 +343,19 @@ int super_decrypt(uint8_t *data){
 
 	p += out_len;
 
-	return 1;
+	retval = 1;
+
+end:
+	if(hdr_ctx != NULL){
+		EVP_CIPHER_CTX_cleanup(hdr_ctx);
+		OPENSSL_free(hdr_ctx);
+	}
+	if(bdy_ctx != NULL){
+		EVP_CIPHER_CTX_cleanup(bdy_ctx);
+		OPENSSL_free(bdy_ctx);
+	}
+
+	return retval;
 
 }
 
