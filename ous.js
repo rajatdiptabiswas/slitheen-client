@@ -67,9 +67,6 @@ page.onResourceReceived = function(response) {
 		}
 	}
 	if(response.stage == "end" && response.contentType == "slitheen"){
-		fs.write("slitheen.out", response.body, 'a');
-		fs.write("slitheen.out", '\n', 'a');
-
 		output.write(response.bodySize + '\n' + response.body);
 		output.flush();
 	}
