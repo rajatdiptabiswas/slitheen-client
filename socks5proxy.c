@@ -209,7 +209,6 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 
 #ifdef DEBUG
 	printf("Received %d bytes (id %d):\n", bytes_read, stream_id);
-	int i;
 	for(i=0; i< bytes_read; i++){
 		printf("%02x ", buffer[i]);
 	}
@@ -414,10 +413,16 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 				BIO_write(bio, buffer, 20);
 				BIO_flush(bio);
 				BIO_get_mem_ptr(bio, &buffer_ptr);
+				encoded_bytes = (*buffer_ptr).data;
 				BIO_set_close(bio, BIO_NOCLOSE);
 				BIO_free_all(bio);
-				encoded_bytes = (*buffer_ptr).data;
+
+				uint8_t *ebytes = calloc(1, (*buffer_ptr).length+1);
+				memcpy(ebytes, (*buffer_ptr).data, (*buffer_ptr).length);
+				ebytes[(*buffer_ptr).length] = '\0';
+
 				ous_in = socket(AF_INET, SOCK_STREAM, 0);
+
 
 				if(ous_in < 0){
 					printf("Failed to make ous_in socket\n");
@@ -428,13 +433,16 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 				error = connect(ous_in, (struct sockaddr *) &ous_addr, sizeof (struct sockaddr));
 				if(error < 0){
 					printf("Error connecting\n");
-				fflush(stdout);
+					fflush(stdout);
 					goto err;
 				}
 
 				sprintf(message, "POST / HTTP/1.1\r\nContent-Length: %zd\r\n\r\n%s ",
-						strlen(encoded_bytes)+1, encoded_bytes);
+						strlen( (char *)ebytes)+1, ebytes);
+
+				free(ebytes);
 				bytes_sent = send(ous_in, message, strlen(message), 0);
+				printf("Closing message: %s\n", message);
 				close(ous_in);
 
 				goto err;
@@ -722,17 +730,22 @@ void *demultiplex_data(){
 					//save any future data
 					printf("Received header with count %lu. Expected count %lu.\n",
 							sl_hdr->counter, expected_next_count);
-					if(saved_data == NULL){
-						saved_data = malloc(sizeof(data_block));
-						saved_data->count = sl_hdr->counter;
-                                                saved_data->len = ntohs(sl_hdr->len);
-						saved_data->data = malloc(saved_data->len);
-                                                memcpy(saved_data->data, p, saved_data->len);
-                                                saved_data->pipe_fd = pipe_fd;
-						saved_data->next = NULL;
+					if((saved_data == NULL) || (saved_data->count > sl_hdr->counter)){
+						data_block *new_block = malloc(sizeof(data_block));
+						new_block->count = sl_hdr->counter;
+                        new_block->len = ntohs(sl_hdr->len);
+						new_block->data = malloc(ntohs(sl_hdr->len));
+
+						memcpy(new_block->data, p, ntohs(sl_hdr->len));
+                        
+						new_block->pipe_fd = pipe_fd;
+						new_block->next = saved_data;
+
+						saved_data = new_block;
+
 					} else {
 						data_block *last = saved_data;
-						while(last->next != NULL){
+						while((last->next != NULL) && (last->next->count < sl_hdr->counter)){
 							last = last->next;
 						}
 						data_block *new_block = malloc(sizeof(data_block));
@@ -741,7 +754,7 @@ void *demultiplex_data(){
 						new_block->data = malloc(ntohs(sl_hdr->len));
 						memcpy(new_block->data, p, ntohs(sl_hdr->len));
                                                 new_block->pipe_fd = pipe_fd;
-						new_block->next = NULL;
+						new_block->next = last->next;
 
 						last->next = new_block;
 					}
