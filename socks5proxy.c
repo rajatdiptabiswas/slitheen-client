@@ -112,11 +112,10 @@ int main(void){
 		printf("Error connecting\n");
 		return 1;
 	}
-	char *message = calloc(1, BUFSIZ);
-	sprintf(message, "POST / HTTP/1.1\r\nContent-Length: %zd\r\n\r\n%s ", strlen(encoded_bytes), encoded_bytes);
-	int32_t bytes_sent = send(ous_in, message, strlen(message), 0);
-	printf("Wrote %d bytes to OUS_in:\n %s\n", bytes_sent, message);
-	free(message);
+        uint16_t len = strlen(encoded_bytes);
+	int32_t bytes_sent = send(ous_in, (unsigned char *) &len, sizeof(uint16_t), 0);
+	bytes_sent += send(ous_in, encoded_bytes, len, 0);
+	printf("Wrote %d bytes to OUS_in: %x\n %s\n", bytes_sent, len, encoded_bytes);
 
 	/* Spawn process to listen for incoming data from OUS 
 	int32_t demux_pipe[2];
@@ -354,12 +353,12 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 		goto err;
 	}
 
-	char *message = calloc(1, BUFSIZ);
-	sprintf(message, "POST / HTTP/1.1\r\nContent-Length: %zd\r\n\r\n%s ", strlen(encoded_bytes)+1, encoded_bytes);
-	bytes_sent = send(ous_in, message, strlen(message), 0);
+        uint16_t len = strlen(encoded_bytes);
+	bytes_sent = send(ous_in, (unsigned char *) &len, sizeof(uint16_t), 0);
+	bytes_sent += send(ous_in, encoded_bytes, strlen(encoded_bytes), 0);
 
 #ifdef DEBUG_UPSTREAM
-	printf("Wrote %d bytes to OUS_in: %s\n", bytes_sent, message);
+	printf("Wrote %d bytes to OUS_in: %x %s\n", bytes_sent, len, encoded_bytes);
 #endif
 
 	if(bytes_sent < 0){
@@ -460,12 +459,10 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 					goto err;
 				}
 
-				sprintf(message, "POST / HTTP/1.1\r\nContent-Length: %zd\r\n\r\n%s ",
-						strlen( (char *)ebytes)+1, ebytes);
-
-				free(ebytes);
-				bytes_sent = send(ous_in, message, strlen(message), 0);
-				printf("Closing message: %s\n", message);
+                                len = (*buffer_ptr).length;
+                                bytes_sent = send(ous_in, (unsigned char *) &len, sizeof(uint16_t), 0);
+                                bytes_sent += send(ous_in, ebytes, len, 0);
+				printf("Closing message: %s\n", ebytes);
 				close(ous_in);
 
 				goto err;
@@ -516,12 +513,12 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 					return 1;
 				}
 
-				sprintf(message, "POST / HTTP/1.1\r\nContent-Length: %zd\r\n\r\n%s ",
-						strlen(encoded_bytes)+1, encoded_bytes);
-				bytes_sent = send(ous_in, message, strlen(message), 0);
+                                len = strlen(encoded_bytes);
+                                bytes_sent = send(ous_in, (unsigned char *) &len, sizeof(uint16_t), 0);
+                                bytes_sent += send(ous_in, encoded_bytes, len, 0);
 
 #ifdef DEBUG_UPSTREAM
-				printf("Sent to OUS (%d bytes):%s\n",bytes_sent, message);
+				printf("Sent to OUS (%d bytes): %x %s\n",bytes_sent, len, message);
 #endif
 				close(ous_in);
 
