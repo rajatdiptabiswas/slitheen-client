@@ -113,7 +113,7 @@ int main(void){
 		return 1;
 	}
         uint16_t len = htons(strlen(encoded_bytes));
-	int32_t bytes_sent = send(ous_in, (unsigned char *) &len), sizeof(uint16_t), 0);
+	int32_t bytes_sent = send(ous_in, (unsigned char *) &len, sizeof(uint16_t), 0);
 	bytes_sent += send(ous_in, encoded_bytes, ntohs(len), 0);
 	printf("Wrote %d bytes to OUS_in: %x\n %s\n", bytes_sent, len, encoded_bytes);
 
