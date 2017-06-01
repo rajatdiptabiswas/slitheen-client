@@ -112,9 +112,9 @@ int main(void){
 		printf("Error connecting\n");
 		return 1;
 	}
-        uint16_t len = strlen(encoded_bytes);
-	int32_t bytes_sent = send(ous_in, (unsigned char *) &len, sizeof(uint16_t), 0);
-	bytes_sent += send(ous_in, encoded_bytes, len, 0);
+        uint16_t len = htons(strlen(encoded_bytes));
+	int32_t bytes_sent = send(ous_in, (unsigned char *) &len), sizeof(uint16_t), 0);
+	bytes_sent += send(ous_in, encoded_bytes, ntohs(len), 0);
 	printf("Wrote %d bytes to OUS_in: %x\n %s\n", bytes_sent, len, encoded_bytes);
 
 	/* Spawn process to listen for incoming data from OUS 
@@ -353,7 +353,7 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 		goto err;
 	}
 
-        uint16_t len = strlen(encoded_bytes);
+        uint16_t len = htons(strlen(encoded_bytes));
 	bytes_sent = send(ous_in, (unsigned char *) &len, sizeof(uint16_t), 0);
 	bytes_sent += send(ous_in, encoded_bytes, strlen(encoded_bytes), 0);
 
@@ -459,9 +459,9 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 					goto err;
 				}
 
-                                len = (*buffer_ptr).length;
+                                len = htons((*buffer_ptr).length);
                                 bytes_sent = send(ous_in, (unsigned char *) &len, sizeof(uint16_t), 0);
-                                bytes_sent += send(ous_in, ebytes, len, 0);
+                                bytes_sent += send(ous_in, ebytes, ntohs(len), 0);
 				printf("Closing message: %s\n", ebytes);
 				close(ous_in);
 
@@ -513,9 +513,9 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 					return 1;
 				}
 
-                                len = strlen(encoded_bytes);
+                                len = htons(strlen(encoded_bytes));
                                 bytes_sent = send(ous_in, (unsigned char *) &len, sizeof(uint16_t), 0);
-                                bytes_sent += send(ous_in, encoded_bytes, len, 0);
+                                bytes_sent += send(ous_in, encoded_bytes, ntohs(len), 0);
 
 #ifdef DEBUG_UPSTREAM
 				printf("Sent to OUS (%d bytes): %x %s\n",bytes_sent, len, message);
