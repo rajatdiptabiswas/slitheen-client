@@ -99,7 +99,7 @@ int main(void){
 	struct sockaddr_in ous_addr;
 	ous_addr.sin_family = AF_INET;
 	inet_pton(AF_INET, "127.0.0.1", &(ous_addr.sin_addr));
-	ous_addr.sin_port = htons(8888);
+	ous_addr.sin_port = htons(57173);
 
 	int32_t ous_in = socket(AF_INET, SOCK_STREAM, 0);
 	if(ous_in < 0){
