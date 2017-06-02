@@ -204,7 +204,7 @@ int main(void){
 		if(pid == 0){ //child
 
 			close(listen_socket);
-			proxy_data(new_socket, new_conn->stream_id, pipefd[0]);
+			proxy_data(new_socket, new_conn->stream_id, pipefd[0], ous_in);
 			exit(0);
 		}
 
@@ -216,7 +216,7 @@ int main(void){
 }
 
 //continuously read from the socket and look for a CONNECT message
-int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
+int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out, int32_t ous_in){
 	uint8_t *buffer = calloc(1, BUFSIZ);
 	uint8_t *response = calloc(1, BUFSIZ);
 
@@ -336,23 +336,6 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 	BIO_free_all(bio);
 	encoded_bytes = (*buffer_ptr).data;
 
-	struct sockaddr_in ous_addr;
-	ous_addr.sin_family = AF_INET;
-	inet_pton(AF_INET, "127.0.0.1", &(ous_addr.sin_addr));
-	ous_addr.sin_port = htons(8888);
-
-	int32_t ous_in = socket(AF_INET, SOCK_STREAM, 0);
-	if(ous_in < 0){
-		printf("Failed to make ous_in socket\n");
-		goto err;
-	}
-
-	int32_t error = connect(ous_in, (struct sockaddr *) &ous_addr, sizeof (struct sockaddr));
-	if(error < 0){
-		printf("Error connecting\n");
-		goto err;
-	}
-
         uint16_t len = htons(strlen(encoded_bytes));
 	bytes_sent = send(ous_in, (unsigned char *) &len, sizeof(uint16_t), 0);
 	bytes_sent += send(ous_in, encoded_bytes, strlen(encoded_bytes), 0);
@@ -365,8 +348,6 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 		printf("Error writing to websocket\n");
 		fflush(stdout);
 		goto err;
-	} else {
-		close(ous_in);
 	}
 
 	p = buffer+sizeof(struct slitheen_up_hdr);
@@ -443,27 +424,10 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 				memcpy(ebytes, (*buffer_ptr).data, (*buffer_ptr).length);
 				ebytes[(*buffer_ptr).length] = '\0';
 
-				ous_in = socket(AF_INET, SOCK_STREAM, 0);
-
-
-				if(ous_in < 0){
-					printf("Failed to make ous_in socket\n");
-					fflush(stdout);
-					goto err;
-				}
-
-				error = connect(ous_in, (struct sockaddr *) &ous_addr, sizeof (struct sockaddr));
-				if(error < 0){
-					printf("Error connecting\n");
-					fflush(stdout);
-					goto err;
-				}
-
                                 len = htons((*buffer_ptr).length);
                                 bytes_sent = send(ous_in, (unsigned char *) &len, sizeof(uint16_t), 0);
                                 bytes_sent += send(ous_in, ebytes, ntohs(len), 0);
 				printf("Closing message: %s\n", ebytes);
-				close(ous_in);
 
 				goto err;
 				
@@ -501,18 +465,6 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 				BIO_free_all(bio);
 				encoded_bytes = (*buffer_ptr).data;
 				
-				ous_in = socket(AF_INET, SOCK_STREAM, 0);
-				if(ous_in < 0){
-					printf("Failed to make ous_in socket\n");
-					return 1;
-				}
-
-				error = connect(ous_in, (struct sockaddr *) &ous_addr, sizeof (struct sockaddr));
-				if(error < 0){
-					printf("Error connecting\n");
-					return 1;
-				}
-
                                 len = htons(strlen(encoded_bytes));
                                 bytes_sent = send(ous_in, (unsigned char *) &len, sizeof(uint16_t), 0);
                                 bytes_sent += send(ous_in, encoded_bytes, ntohs(len), 0);
@@ -520,7 +472,6 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 #ifdef DEBUG_UPSTREAM
 				printf("Sent to OUS (%d bytes): %x %s\n",bytes_sent, len, message);
 #endif
-				close(ous_in);
 
 
 			}
@@ -566,6 +517,7 @@ int proxy_data(int sockfd, uint16_t stream_id, int32_t ous_out){
 err:
 		//should also remove stream from table
 	close(sockfd);
+	close(ous_in);
 	free(buffer);
 	free(response);
 	exit(0);

@@ -34,7 +34,7 @@
 #define SLITHEEN_SUPER_CONST "SLITHEEN_SUPER_ENCRYPT"
 #define SLITHEEN_SUPER_CONST_SIZE 22
 
-int proxy_data(int sockfd, uint16_t stream_id, int32_t pipefd);
+int proxy_data(int sockfd, uint16_t stream_id, int32_t pipefd, int32_t ous_in);
 void *demultiplex_data();
 
 struct __attribute__ ((__packed__)) slitheen_hdr {
