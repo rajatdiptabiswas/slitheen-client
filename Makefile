@@ -1,13 +1,13 @@
-CFLAGS=-g -Wall
+CFLAGS=-g -Wall -ggdb
 
 TARGETS= socks
 
 all: $(TARGETS)
 
-socks5proxy.o crypto.o tagging.o ptwist168.o:: socks5proxy.h crypto.h tagging.h ptwist.h
+socks5proxy.o crypto.o tagging.o ptwist168.o util.o:: socks5proxy.h crypto.h tagging.h ptwist.h util.h
 
-socks: socks5proxy.o crypto.o tagging.o ptwist168.o ptwist.h tagging.h crypto.h socks5proxy.h
-	gcc -o $@ $^ -lpthread -lssl -lcrypto
+socks: socks5proxy.o crypto.o tagging.o ptwist168.o util.o util.h ptwist.h tagging.h crypto.h socks5proxy.h
+	gcc -o $@ $^ -L/usr/local/lib -I/usr/local/include -lpthread -lssl -lcrypto
 
 clean:
 	-rm *.o

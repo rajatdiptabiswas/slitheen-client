@@ -24,70 +24,15 @@
  * a combination shall include the source code for the parts of the OpenSSL
  * library used as well as that of the covered work.}
  */
-#ifndef _SOCKS5PROXY_H_
-#define _SOCKS5PROXY_H_
+#ifndef _UTIL_H_
+#define _UTIL_H_
 
 #include <stdint.h>
+#include <stdlib.h>
 
-#define SLITHEEN_ID_LEN 28
-#define SLITHEEN_SUPER_SECRET_SIZE 16
-#define SLITHEEN_SUPER_CONST "SLITHEEN_SUPER_ENCRYPT"
-#define SLITHEEN_SUPER_CONST_SIZE 22
+int base64_encode(uint8_t *in, size_t len, char **out);
+void *emalloc(size_t size);
+void *ecalloc(size_t nmemb, size_t size);
 
-void *demultiplex_data();
-void *multiplex_data();
-void *ous_IO();
-int remove_connection(uint16_t stream_id);
+#endif
 
-struct __attribute__ ((__packed__)) slitheen_hdr {
-	uint64_t counter;
-	uint16_t stream_id;
-	uint16_t len;
-	uint16_t garbage;
-	uint16_t zeros;
-};
-
-#define SLITHEEN_HEADER_LEN 16
-
-struct __attribute__ ((__packed__)) slitheen_up_hdr{
-	uint16_t stream_id;
-	uint16_t len;
-};
-
-#define NEW_STREAM 0
-#define NEGOTIATED 1
-#define CONNECTED 2
-
-
-typedef struct connection_st{
-	uint16_t stream_id;
-        int32_t socket;
-        uint8_t state;
-	struct connection_st *next;
-} connection;
-
-typedef struct connection_table_st{
-	connection *first;
-} connection_table;
-
-typedef struct data_block_st {
-	uint64_t count;
-	uint8_t *data;
-        uint16_t len;
-        int32_t socket;
-	struct data_block_st *next;
-} data_block;
-
-struct socks_method_req {
-	uint8_t version;
-	uint8_t num_methods;
-};
-
-struct socks_req {
-	uint8_t version;
-	uint8_t cmd;
-	uint8_t rsvd;
-	uint8_t addr_type;
-};
-
-#endif /* _SOCKS5PROXY_H_ */
