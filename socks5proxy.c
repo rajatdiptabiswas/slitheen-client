@@ -203,7 +203,7 @@ void *ous_IO(void *args){
 
     printf("Generated super encrypt keys\n");
 
-    char *encoded_bytes;
+    char *encoded_bytes = NULL;
     base64_encode(slitheen_id, SLITHEEN_ID_LEN, &encoded_bytes);
 
     printf("Encoded ID\n");
@@ -421,7 +421,7 @@ void *multiplex_data(void *args){
 
         struct slitheen_up_hdr *up_hdr;
         uint16_t len;
-        char *encoded_bytes;
+        char *encoded_bytes = NULL;
 
         conn = connections->first;
         while(conn != NULL){
@@ -454,6 +454,9 @@ void *multiplex_data(void *args){
 
                         printf("Wrote %d bytes to ous\n", bytes_sent);
                         printf("Closing message: %s\n", encoded_bytes);
+
+                        free(encoded_bytes);
+                        encoded_bytes = NULL;
                     }
 
                     close(conn->socket);
@@ -546,6 +549,9 @@ void *multiplex_data(void *args){
                         bytes_sent += write(pipes->in, encoded_bytes, ntohs(len));
                         printf("Wrote %d bytes to ous\n", bytes_sent);
 
+                        free(encoded_bytes);
+                        encoded_bytes = NULL;
+
                         conn->state = CONNECTED;
 
                         break;
@@ -577,8 +583,10 @@ void *multiplex_data(void *args){
                         printf("Wrote %d bytes to ous\n", bytes_sent);
 
 #ifdef DEBUG_UPSTREAM
-                        printf("Sent to OUS (%d bytes): %x %s\n",bytes_sent, len, message);
+                        printf("Sent to OUS (%d bytes): %x %s\n",bytes_sent, len, encoded_bytes);
 #endif
+                        free(encoded_bytes);
+                        encoded_bytes = NULL;
                         break;
                     default:
                         fprintf(stderr, "Wrong connection state\n");
