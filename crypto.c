@@ -241,17 +241,20 @@ int peek_header(uint8_t *data){
     EVP_CipherInit_ex(hdr_ctx, EVP_aes_256_ecb(), NULL, super->header_key, NULL, 0);
 
 	if(!EVP_CipherUpdate(hdr_ctx, p, &out_len, p, SLITHEEN_HEADER_LEN)){
-		printf("Decryption failed!");
+		printf("Decryption failed!\n");
 		retval =  0;
 		goto end;
 	}
 
 	struct slitheen_hdr *sl_hdr = (struct slitheen_hdr *) p;
 
-	if(!sl_hdr->len){//there are no data to be decrypted
-		retval =  1;
-		goto end;
-	}
+        //Finally, check to see if the last few bytes are zeroed.
+        if(sl_hdr->zeros){
+            //zeros have been corrupted, decryption failed
+            printf("Decryption failed!\n");
+            retval = 0;
+            goto end;
+        }
 
 #ifdef DEBUG_PARSE
 	printf("Decrypted header (%d bytes):\n", SLITHEEN_HEADER_LEN);
