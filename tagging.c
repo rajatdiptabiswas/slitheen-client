@@ -74,7 +74,7 @@ static void gen_tag(byte *tag, byte stored_key[16],
 
     /* Create the tag hash keys */
     memmove(sharedsec+PTWIST_BYTES, context, context_len);
-    SHA256(sharedsec, PTWIST_BYTES, taghashout);
+    SHA256(sharedsec, PTWIST_BYTES + context_len, taghashout);
 
 #if PTWIST_PUZZLE_STRENGTH > 0
     /* The puzzle is to find a response R such that SHA256(K || R)
