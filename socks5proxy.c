@@ -51,8 +51,6 @@
 #include "tagging.h"
 #include "util.h"
 
-#define DEBUG
-
 static connection_table *connections;
 
 typedef struct {
@@ -85,7 +83,9 @@ int main(void){
     pipes.in = ous_in[0];
     pipes.out = ous_out[1];
 
-    /* Spawn a thread to communicate with OUS */
+    /* Spawn a thread to listen for incomming OUS connections */
+
+    /* Spawn a thread to do OUS IO */
     pthread_t *ous_thread = calloc(1, sizeof(pthread_t));
     pthread_create(ous_thread, NULL, ous_IO, (void *) &pipes);
 
@@ -265,7 +265,7 @@ void *ous_IO(void *args){
 
             bytes_read = read(ous_in, buffer, buffer_len);
 
-#ifdef DEBUG
+#ifdef DEBUG_IO
             printf("Received %d bytes from multiplexer\n", bytes_read);
             for(int i=0; i< bytes_read; i++){
                 printf("%02x ", buffer[i]);
@@ -276,7 +276,7 @@ void *ous_IO(void *args){
 
             if(bytes_read > 0){
                 bytes_sent = send(ous, buffer, bytes_read, 0);
-#ifdef DEBUG
+#ifdef DEBUG_IO
                 printf("Sent %d bytes to OUS\n", bytes_sent);
                 for(int i=0; i< bytes_sent; i++){
                     printf("%02x ", buffer[i]);
@@ -304,7 +304,7 @@ void *ous_IO(void *args){
         if(FD_ISSET(ous, &read_fds) && FD_ISSET(ous_out, &write_fds)){
 
             bytes_read = recv(ous, buffer, 4, 0);
-#ifdef DEBUG
+#ifdef DEBUG_IO
             printf("Received %d bytes from OUS\n", bytes_read);
             for(int i=0; i< bytes_read; i++){
                 printf("%02x ", buffer[i]);
@@ -324,7 +324,7 @@ void *ous_IO(void *args){
 
             
             bytes_read = recv(ous, buffer, *chunk_len, 0);
-#ifdef DEBUG
+#ifdef DEBUG_IO
             printf("Received %d bytes from OUS\n", bytes_read);
             for(int i=0; i< bytes_read; i++){
                 printf("%02x ", buffer[i]);
@@ -335,7 +335,7 @@ void *ous_IO(void *args){
 
             if(bytes_read > 0){
                 bytes_sent = write(ous_out, buffer, bytes_read);
-#ifdef DEBUG
+#ifdef DEBUG_IO
                 printf("Sent %d bytes to demultiplexer\n", bytes_sent);
                 for(int i=0; i< bytes_sent; i++){
                     printf("%02x ", buffer[i]);
@@ -559,7 +559,7 @@ void *multiplex_data(void *args){
                         printf("Received application data from stream %d\n", conn->stream_id);
 #ifdef DEBUG_UPSTREAM
                         printf("Received %d data bytes from sockfd (id %d):\n", bytes_read, conn->stream_id);
-                        for(i=0; i< bytes_read; i++){
+                        for(int i=0; i< bytes_read; i++){
                                 printf("%02x ", buffer[i]);
                         }
                         printf("\n");
