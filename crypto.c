@@ -227,7 +227,7 @@ int peek_header(uint8_t *data){
 	int retval = 1;
 
 	//decrypt header
-#ifdef DEBUG
+#ifdef DEBUG_PEEK
 	int i;
 	printf("Encrypted header:\n");
 	for(i=0; i< SLITHEEN_HEADER_LEN; i++){
@@ -241,7 +241,6 @@ int peek_header(uint8_t *data){
     EVP_CipherInit_ex(hdr_ctx, EVP_aes_256_ecb(), NULL, super->header_key, NULL, 0);
 
 	if(!EVP_CipherUpdate(hdr_ctx, p, &out_len, p, SLITHEEN_HEADER_LEN)){
-		printf("Decryption failed!\n");
 		retval =  0;
 		goto end;
 	}
@@ -320,14 +319,14 @@ int super_decrypt(uint8_t *data){
 	}
 
 
-//#ifdef DEBUG_PARSE
+#ifdef DEBUG
 	printf("Decrypted header (%d bytes):\n", SLITHEEN_HEADER_LEN);
 	for(i=0; i< SLITHEEN_HEADER_LEN; i++){
 		printf("%02x ", p[i]);
 	}
 	printf("\n");
 	fflush(stdout);
-//#endif
+#endif
 	
 	p += SLITHEEN_HEADER_LEN;
 
@@ -396,7 +395,7 @@ int super_decrypt(uint8_t *data){
 		goto end;
 	}
 
-#ifdef DEBUG_PARSE
+#ifdef DEBUG
 	printf("Decrypted data (%d bytes):\n", out_len);
 	for(i=0; i< out_len; i++){
 		printf("%02x ", p[i]);

@@ -1,4 +1,4 @@
-CFLAGS=-g -Wall -ggdb
+CFLAGS=-g -Wall -ggdb -DDEBUG -DDEBUG_UPSTREAM
 
 TARGETS= socks
 
