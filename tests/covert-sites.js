@@ -43,6 +43,13 @@ page.onResourceReceived = function(response) {
 var stream = fs.open('top100.txt', 'r');
 
 function loadpage(){
+
+    //ping port 8888 to mark end of page
+    var url = "http://localhost:8888";
+    page.open(url, function (status) {
+        
+    
+
     var line = stream.readLine();
     console.log(line);
 
@@ -65,6 +72,7 @@ function loadpage(){
         }
 
 
+    });
     });
 
 }
