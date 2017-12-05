@@ -12,7 +12,7 @@ import logging
 from urlparse import urlparse
 
 # Logging`
-LOGFILE = "slifox.log"
+LOGFILE = "slifox_driver.log"
 
 # Overt sites list
 OVERT_SITES = ["https://www.python.org", "https://www.youtube.com/"]
