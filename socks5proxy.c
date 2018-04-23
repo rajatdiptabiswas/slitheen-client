@@ -10,14 +10,14 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
  * Additional permission under GNU GPL version 3 section 7
- * 
+ *
  * If you modify this Program, or any covered work, by linking or combining
- * it with the OpenSSL library (or a modified version of that library), 
+ * it with the OpenSSL library (or a modified version of that library),
  * containing parts covered by the terms of the OpenSSL Licence and the
  * SSLeay license, the licensors of this Program grant you additional
  * permission to convey the resulting work. Corresponding Source for a
@@ -60,14 +60,14 @@ typedef struct {
 
 int main(void){
     int listen_socket;
-    
+
     struct sockaddr_in address;
     struct sockaddr_in remote_addr;
     socklen_t addr_size;
 
     connections = calloc(1, sizeof(connection_table));
     connections->first = NULL;
-    
+
     int32_t ous_in[2];
     if(pipe(ous_in) < 0){
         printf("Failed to create pipe\n");
@@ -147,11 +147,11 @@ int main(void){
         //assign a new stream_id and create a pipe for the session
         connection *new_conn = calloc(1, sizeof(connection));
         new_conn->stream_id = last_id++;
-        
+
         new_conn->socket = new_socket;
         new_conn->state = NEW_STREAM;
         new_conn->next = NULL;
-        
+
         if(connections->first == NULL){
             connections->first = new_conn;
             printf("Added first connection with id: %d\n", new_conn->stream_id);
@@ -319,10 +319,10 @@ void *ous_IO(void *args){
             }
 
             uint32_t *chunk_len = (uint32_t*) buffer;
-            
+
             fprintf(stderr, "Length of this chunk: %u\n", *chunk_len);
 
-            
+
             bytes_read = recv(ous, buffer, *chunk_len, 0);
 #ifdef DEBUG_IO
             printf("Received %d bytes from OUS\n", bytes_read);
@@ -624,7 +624,7 @@ void *demultiplex_data(void *args){
     for(;;){
         printf("Demux thread waiting to read\n");
         int32_t bytes_read = read(pipes->out, buffer, buffer_len-partial_block_len);
-		
+
         if(bytes_read > 0){
             int32_t chunk_remaining = bytes_read;
             p = buffer;
@@ -730,12 +730,12 @@ void *demultiplex_data(void *args){
                         }
                     }
                 }
-				
+
                 if(sock == -1){
                     printf("No stream id exists. Possibly invalid header\n");
                     break;
                 }
-				
+
 #ifdef DEBUG_PARSE
                 printf("Received information for stream id: %d of length: %u\n", sl_hdr->stream_id, ntohs(sl_hdr->len));
 #endif
@@ -794,7 +794,7 @@ void *demultiplex_data(void *args){
                 if(saved_data != NULL){
                     data_block *current_block = saved_data;
                     while((current_block != NULL) && (expected_next_count == current_block->count)){
-                        int32_t bytes_sent = send(current_block->socket, current_block->data, 
+                        int32_t bytes_sent = send(current_block->socket, current_block->data,
                                 current_block->len, 0);
                         if(bytes_sent <= 0){
                             printf("Error writing to socket for stream id %d\n", sl_hdr->stream_id);
@@ -820,7 +820,7 @@ void *demultiplex_data(void *args){
             printf("Error: read %d bytes from OUS_out\n", bytes_read);
             goto err;
         }
-		
+
     }
 err:
     free(buffer);
