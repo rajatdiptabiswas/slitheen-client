@@ -137,7 +137,7 @@ int main(void){
         addr_size = sizeof(remote_addr);
         int new_socket;
         new_socket = accept(listen_socket, (struct sockaddr *) &remote_addr,
-                                        &addr_size);
+                &addr_size);
         if(new_socket < 0){
             perror("accept");
             exit(1);
@@ -560,7 +560,7 @@ void *multiplex_data(void *args){
 #ifdef DEBUG_UPSTREAM
                         printf("Received %d data bytes from sockfd (id %d):\n", bytes_read, conn->stream_id);
                         for(int i=0; i< bytes_read; i++){
-                                printf("%02x ", buffer[i]);
+                            printf("%02x ", buffer[i]);
                         }
                         printf("\n");
                         printf("%s\n", buffer);
@@ -751,7 +751,7 @@ void *demultiplex_data(void *args){
                 if(sl_hdr->counter > expected_next_count){
                     //save any future data
                     printf("Received header with count %lu. Expected count %lu.\n",
-                                        sl_hdr->counter, expected_next_count);
+                            sl_hdr->counter, expected_next_count);
                     if((saved_data == NULL) || (saved_data->count > sl_hdr->counter)){
                         data_block *new_block = malloc(sizeof(data_block));
                         new_block->count = sl_hdr->counter;
@@ -852,5 +852,3 @@ int remove_connection(uint16_t stream_id){
 
     return 1;
 }
-
-

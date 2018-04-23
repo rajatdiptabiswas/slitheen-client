@@ -10,14 +10,14 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
  * Additional permission under GNU GPL version 3 section 7
- * 
+ *
  * If you modify this Program, or any covered work, by linking or combining
- * it with the OpenSSL library (or a modified version of that library), 
+ * it with the OpenSSL library (or a modified version of that library),
  * containing parts covered by the terms of the OpenSSL Licence and the
  * SSLeay license, the licensors of this Program grant you additional
  * permission to convey the resulting work. Corresponding Source for a
@@ -47,7 +47,7 @@ byte twistpub[PTWIST_BYTES];
 
 
 static void gen_tag(byte *tag, byte stored_key[16],
-	const byte *context, size_t context_len)
+        const byte *context, size_t context_len)
 {
     byte seckey[PTWIST_BYTES];
     byte sharedsec[PTWIST_BYTES+context_len];
@@ -88,21 +88,21 @@ static void gen_tag(byte *tag, byte stored_key[16],
     value_to_hash[16+PTWIST_RESP_BYTES-1] &= PTWIST_RESP_MASK;
 
     while(1) {
-	unsigned int firstbits;
+        unsigned int firstbits;
 
-	md_map_sh256(hashout, value_to_hash, puzzle_len);
+        md_map_sh256(hashout, value_to_hash, puzzle_len);
 #if PTWIST_PUZZLE_STRENGTH < 32
-	/* This assumes that you're on an architecture that doesn't care
-	 * about alignment, and is little endian. */
-	firstbits = *(unsigned int*)hashout;
-	if ((firstbits & PTWIST_PUZZLE_MASK) == 0) {
-	    break;
-	}
-	/* Increment R and try again. */
-	for(i=0;i<PTWIST_RESP_BYTES;++i) {
-	    if (++value_to_hash[16+i]) break;
-	}
-	value_to_hash[16+PTWIST_RESP_BYTES-1] &= PTWIST_RESP_MASK;
+        /* This assumes that you're on an architecture that doesn't care
+         * about alignment, and is little endian. */
+        firstbits = *(unsigned int*)hashout;
+        if ((firstbits & PTWIST_PUZZLE_MASK) == 0) {
+            break;
+        }
+        /* Increment R and try again. */
+        for(i=0;i<PTWIST_RESP_BYTES;++i) {
+            if (++value_to_hash[16+i]) break;
+        }
+        value_to_hash[16+PTWIST_RESP_BYTES-1] &= PTWIST_RESP_MASK;
 #else
 #error "Code assumes PTWIST_PUZZLE_STRENGTH < 32"
 #endif
@@ -154,24 +154,24 @@ int generate_slitheen_id(byte *slitheen_id, byte stored_key[16])
     /* Read the public keys */
     fp = fopen("pubkey", "rb");
     if (fp == NULL) {
-		perror("fopen");
-		exit(1);
+        perror("fopen");
+        exit(1);
     }
     res = fread(mainpub, PTWIST_BYTES, 1, fp);
     if (res < 1) {
-		perror("fread");
-		exit(1);
+        perror("fread");
+        exit(1);
     }
     res = fread(twistpub, PTWIST_BYTES, 1, fp);
     if (res < 1) {
-		perror("fread");
-		exit(1);
+        perror("fread");
+        exit(1);
     }
     fclose(fp);
 
-	tag = slitheen_id;
+    tag = slitheen_id;
 
-	gen_tag(tag, stored_key, (const byte *)"context", 7);
+    gen_tag(tag, stored_key, (const byte *)"context", 7);
 
     return 0;
 }

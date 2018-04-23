@@ -35,7 +35,7 @@ void *emalloc(size_t size){
     void *ptr = malloc(size);
     if (ptr == NULL){
         fprintf(stderr, "Memory failure. Exiting...\n");
-	exit(1);
+        exit(1);
     }
 
     return ptr;

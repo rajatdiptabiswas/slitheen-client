@@ -40,18 +40,18 @@ void *ous_IO();
 int remove_connection(uint16_t stream_id);
 
 struct __attribute__ ((__packed__)) slitheen_hdr {
-	uint64_t counter;
-	uint16_t stream_id;
-	uint16_t len;
-	uint16_t garbage;
-	uint16_t zeros;
+    uint64_t counter;
+    uint16_t stream_id;
+    uint16_t len;
+    uint16_t garbage;
+    uint16_t zeros;
 };
 
 #define SLITHEEN_HEADER_LEN 16
 
 struct __attribute__ ((__packed__)) slitheen_up_hdr{
-	uint16_t stream_id;
-	uint16_t len;
+    uint16_t stream_id;
+    uint16_t len;
 };
 
 #define NEW_STREAM 0
@@ -60,34 +60,34 @@ struct __attribute__ ((__packed__)) slitheen_up_hdr{
 
 
 typedef struct connection_st{
-	uint16_t stream_id;
-        int32_t socket;
-        uint8_t state;
-	struct connection_st *next;
+    uint16_t stream_id;
+    int32_t socket;
+    uint8_t state;
+    struct connection_st *next;
 } connection;
 
 typedef struct connection_table_st{
-	connection *first;
+    connection *first;
 } connection_table;
 
 typedef struct data_block_st {
-	uint64_t count;
-	uint8_t *data;
-        uint16_t len;
-        int32_t socket;
-	struct data_block_st *next;
+    uint64_t count;
+    uint8_t *data;
+    uint16_t len;
+    int32_t socket;
+    struct data_block_st *next;
 } data_block;
 
 struct socks_method_req {
-	uint8_t version;
-	uint8_t num_methods;
+    uint8_t version;
+    uint8_t num_methods;
 };
 
 struct socks_req {
-	uint8_t version;
-	uint8_t cmd;
-	uint8_t rsvd;
-	uint8_t addr_type;
+    uint8_t version;
+    uint8_t cmd;
+    uint8_t rsvd;
+    uint8_t addr_type;
 };
 
 #endif /* _SOCKS5PROXY_H_ */
