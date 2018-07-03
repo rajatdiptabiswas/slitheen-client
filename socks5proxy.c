@@ -695,14 +695,26 @@ void *demultiplex_data(void *args){
                 break;
             }
 
-            //decrypt header to see if we have entire block
-            uint8_t *tmp_header = malloc(SLITHEEN_HEADER_LEN);
-            memcpy(tmp_header, p, SLITHEEN_HEADER_LEN);
+	    //decrypt header to see if we have entire block
+	    uint8_t *tmp_header = malloc(SLITHEEN_HEADER_LEN);
 
-            if(!peek_header(tmp_header)){
-                printf("This chunk doesn't contain a Slitheen block\n");
-                break;
-            }
+	    uint8_t success = 0;
+	    for(int i=0; i < SLITHEEN_HEADER_LEN; i++) {
+		    memcpy(tmp_header, p, SLITHEEN_HEADER_LEN);
+		    if(!peek_header(tmp_header)){
+			    printf("Checking %d bytes ahead\n", i);
+		    } else {
+			    success = 1;
+			    break;
+		    }
+		    p++;
+		    chunk_remaining--;
+	    }
+	    if(!success) {
+		    printf("Error: slitheen not present in chunk!\n");
+		    break;
+	    }
+
 
             struct slitheen_hdr *sl_hdr = (struct slitheen_hdr *) tmp_header;
             //first see if sl_hdr corresponds to a valid stream. If not, ignore rest of read bytes
@@ -735,7 +747,7 @@ void *demultiplex_data(void *args){
             p += SLITHEEN_HEADER_LEN;
             chunk_remaining -= SLITHEEN_HEADER_LEN;
 
-            if((!sl_hdr->len) && (sl_hdr->garbage)){
+            if(!sl_hdr->len){
 
 #ifdef DEBUG_PARSE
                 printf("%d Garbage bytes\n", ntohs(sl_hdr->garbage));
