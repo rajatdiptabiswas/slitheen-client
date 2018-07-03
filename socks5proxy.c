@@ -695,25 +695,25 @@ void *demultiplex_data(void *args){
                 break;
             }
 
-	    //decrypt header to see if we have entire block
-	    uint8_t *tmp_header = malloc(SLITHEEN_HEADER_LEN);
+            //decrypt header to see if we have entire block
+            uint8_t *tmp_header = malloc(SLITHEEN_HEADER_LEN);
 
-	    uint8_t success = 0;
-	    for(int i=0; i < SLITHEEN_HEADER_LEN; i++) {
-		    memcpy(tmp_header, p, SLITHEEN_HEADER_LEN);
-		    if(!peek_header(tmp_header)){
-			    printf("Checking %d bytes ahead\n", i);
-		    } else {
-			    success = 1;
-			    break;
-		    }
-		    p++;
-		    chunk_remaining--;
-	    }
-	    if(!success) {
-		    printf("Error: slitheen not present in chunk!\n");
-		    break;
-	    }
+            uint8_t success = 0;
+            for(int i=0; i < SLITHEEN_HEADER_LEN; i++) {
+                memcpy(tmp_header, p, SLITHEEN_HEADER_LEN);
+                if(!peek_header(tmp_header)){
+                    printf("Checking %d bytes ahead\n", i);
+                } else {
+                    success = 1;
+                    break;
+                }
+                p++;
+                chunk_remaining--;
+            }
+            if(!success) {
+                printf("Error: slitheen not present in chunk!\n");
+                break;
+            }
 
 
             struct slitheen_hdr *sl_hdr = (struct slitheen_hdr *) tmp_header;
