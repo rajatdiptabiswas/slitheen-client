@@ -34,6 +34,7 @@
 #define SLITHEEN_SUPER_CONST "SLITHEEN_SUPER_ENCRYPT"
 #define SLITHEEN_SUPER_CONST_SIZE 22
 
+void *accept_conn();
 void *demultiplex_data();
 void *multiplex_data();
 void *ous_IO();

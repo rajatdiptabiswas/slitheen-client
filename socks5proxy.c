@@ -30,6 +30,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <stdint.h>
+#include <signal.h>
 #include <errno.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -59,11 +60,6 @@ typedef struct {
 } ous_pipes;
 
 int main(void){
-    int listen_socket;
-
-    struct sockaddr_in address;
-    struct sockaddr_in remote_addr;
-    socklen_t addr_size;
 
     connections = calloc(1, sizeof(connection_table));
     connections->first = NULL;
@@ -100,10 +96,33 @@ int main(void){
     pthread_t *mux_thread = calloc(1, sizeof(pthread_t));
     pthread_create(mux_thread, NULL, multiplex_data, (void *) &mux_pipes);
 
+    /* Spawn a thread to accept incoming connections from the browser */
+    pthread_t *accept_thread = calloc(1, sizeof(pthread_t));
+    pthread_create(accept_thread, NULL, accept_conn, NULL);
+
+    /* TODO: fix this, for now just waits on demux thread to exit */
+    pthread_join(*demux_thread, NULL);
+    pthread_kill(*accept_thread, 0);
+    pthread_kill(*ous_thread, 0);
+    pthread_kill(*mux_thread, 0);
+
+    return 0;
+}
+
+/** Responsible for accepting new connections from the browser, each connection
+ *  added to the stream table to be checked by the multiplexer.
+ */
+void *accept_conn(void *args){
+    int listen_socket;
+
+    struct sockaddr_in address;
+    struct sockaddr_in remote_addr;
+    socklen_t addr_size;
+
     if (!(listen_socket = socket(AF_INET, SOCK_STREAM, 0))){
         printf("Error creating socket\n");
         fflush(stdout);
-        return 1;
+        pthread_exit(NULL);
     }
 
 
@@ -114,13 +133,13 @@ int main(void){
     int enable = 1;
     if (setsockopt(listen_socket, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable)) <0 ){
         printf("Error setting sockopt\n");
-        return 1;
+        pthread_exit(NULL);
     }
 
     if(bind(listen_socket, (struct sockaddr *) &address, sizeof(address))){
         printf("Error binding socket\n");
         fflush(stdout);
-        return 1;
+        pthread_exit(NULL);
     }
 
     if(listen(listen_socket, 10) < 0){
@@ -140,7 +159,7 @@ int main(void){
                 &addr_size);
         if(new_socket < 0){
             perror("accept");
-            exit(1);
+            pthread_exit(NULL);
         }
         printf("New connection\n");
 
@@ -872,7 +891,6 @@ err:
 
     close(pipes->out);
     pthread_exit(NULL);
-
 }
 
 
