@@ -20,8 +20,8 @@ LOGFILE = "slifox_driver.log"
 OVERT_SITES = ["https://www.python.org", "https://www.youtube.com/", "https://www.instagram.com/beyonce/", "https://www.instagram.com/taylorswift", "https://www.instagram.com/explore/tags/cats/", "https://www.youtube.com/channel/UC4R8DWoMoI7CAwX8_LjQHig", "https://imgur.com/", "https://www.instagram.com/explore/tags/catsofinstagram/", "https://www.instagram.com/explore/tags/ilovecats/", "https://www.instagram.com/selenagomez/", "https://www.instagram.com/badgalriri", "https://www.instagram.com/arianagrande", "https://www.instagram.com/explore/tags/ootd/", "https://www.instagram.com/explore/tags/food/"]
 
 # Browser Actions
-ACTIONS = ["link", "new_addr", "history", "download", "nop"]
-ACTION_PROBABILITIES = [0.451, 0.33, 0.098, 0.012, 0.109]
+ACTIONS = ["link", "new_addr", "history", "download", "nop", "new_tab"]
+ACTION_PROBABILITIES = [0.451, 0.33, 0.098, 0.012, 0.071, 0.038]
 
 # Dwell time distribution params
 WEIBULL_SCALE   = 30
@@ -61,6 +61,12 @@ class SliFoxDriver(object):
             elif action == "download":
                 self.download()
                 return 0
+            elif action == "new_tab":
+                self.open_tab()
+            elif action == "switch_tab":
+                self.switch_tab()
+            elif action == "close_tab":
+                self.close_tab()
             else:
                 return -1
 
@@ -113,6 +119,15 @@ class SliFoxDriver(object):
         
         def download(self):
             self.dwell()
+
+        def open_tab():
+            # https://stackoverflow.com/questions/28431765/open-web-in-new-tab-selenium-python
+            self.driver.find_element_by_name('body').send_keys(Keys.CONTROL + 't')
+
+        #def switch_tab():
+        
+        def close_tab():
+            self.driver.find_element_by_name('body').send_keys(Keys.CONTROL + 'w')
 
 # Misc helper functions
  
