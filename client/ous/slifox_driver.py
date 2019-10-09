@@ -176,6 +176,7 @@ class SliFoxDriver(object):
             fp.set_preference("browser.tabs.remote.autostart.1", False)
             fp.set_preference("browser.tabs.remote.autostart.2", False)
 
+            fp.set_preference("general.useragent.override", "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:60.0) Gecko/20100101 Firefox/68.0")
             logging.info("Starting Slifox Driver ...")
             binary = FirefoxBinary('/home/slitheen/firefox/obj-x86_64-pc-linux-gnu/dist/bin/firefox')
             self.driver = webdriver.Firefox(firefox_profile=fp, firefox_binary = binary, executable_path = "/home/slitheen/client/client/geckodriver-24/geckodriver")
