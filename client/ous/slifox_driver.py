@@ -7,6 +7,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.firefox.firefox_binary import FirefoxBinary
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.firefox.options import Options
+from selenium.webdriver.common.action_chains import ActionChains
 import time
 import random
 import numpy
@@ -39,17 +40,16 @@ class UserModel():
 #        self.driver = SliFoxDriver()
         
         logging.info("Starting SliFox Driver ... ")
-        binary = FirefoxBinary('/home/slitheen/firefox/obj-x86_64-pc-linux-gnu/dist/bin/firefox')
-        self.driver = webdriver.Firefox(firefox_binary = binary, executable_path = "/home/slitheen/client/client/geckodriver-24/geckodriver")
-        self.driver.set_page_load_timeout(30)
-        logging.info("SliFox Dirver starter ... ")
-    
 
+        self.slifox_driver = SliFoxDriver()
+    
     def start(self):
-        pass
+        while True:
+            self.dwell()
+            self.action()
             
     def stop(self):
-        self.driver.close()
+        self.slifox_driver.driver.close()
         logging.info("SliFox Diver stopped ...")
 
     def action(self):
@@ -57,23 +57,23 @@ class UserModel():
             action = numpy.random.choice(self.ACTIONS, p=self.ACTION_PROBABILITIES)
             logging.info("Next action: " + action)
             if action == "link":
-                navigate_within_site()
+                self.navigate_within_site()
                 return 0
             elif action == "new_addr":	
-                navigate_to_new_site()
+                self.navigate_to_random_site()
                 return 0
             elif action == "history":
-                navigate_to_history()
+                self.navigate_to_history()
                 return 0
             elif action == "download":
-                download()
+                self.download()
                 return 0
             elif action == "new_tab":
-                open_tab()
+                self.open_tab()
             elif action == "switch_tab":
-                switch_tab()
+                self.switch_tab()
             elif action == "close_tab":
-                close_tab()
+                self.close_tab()
             else:
                 return -1
     
@@ -83,10 +83,10 @@ class UserModel():
             time.sleep(dwell_time)
 
     # Navigate to a link on the same site
-    def navigate_within_site(elf):
-        current_url = self.driver.current_url
+    def navigate_within_site(self):
+        current_url = self.slifox_driver.driver.current_url
         logging.info("Navigating within site ... ")
-        links = self.driver.find_elements_by_xpath("//a[@href]")
+        links = self.slifox_driver.driver.find_elements_by_xpath("//a[@href]")
         while True:
             try:
                 link_url  = numpy.random.choice(links).get_attribute("href")
@@ -95,13 +95,13 @@ class UserModel():
                 logging.info("Something was wrong with that link ... trying another one")
                 break
 
-            domain = get_domain(link_url)
+            domain = self.get_domain(link_url)
 
             if domain in current_url:
                 logging.debug("Navigating to " + link_url)
                 try:
                     logging.debug("Attempting to navigate within site ...")
-                    self.driver.get(link_url)
+                    self.slifox_driver.driver.get(link_url)
                     break
                 except TimeoutException as tex:
                     logging.info("TimeoutException while navigating within site")
@@ -111,11 +111,11 @@ class UserModel():
              
             while True:
                 new_site = random.choice(OVERT_SITES)
-                current_domain = get_domain(self.driver.current_url)
+                current_domain = self.get_domain(self.slifox_driver.driver.current_url)
                 if new_site not in current_domain:
                     try:
                         logging.info("Attempting to navigate to " + new_site)            	
-                        self.driver.get(new_site)
+                        self.slifox_driver.driver.get(new_site)
                         break
                     except TimeoutException as tex:
                         logging.info("TimeoutException while trying to navigate to a new site")
@@ -124,28 +124,34 @@ class UserModel():
         logging.info("Navigating to " + url)
         
         try:
-            self.driver.get(url)
+            self.slifox_driver.driver.get(url)
         except TimeoutException as tex:
             logging.error("TimeoutException: " + tex)
 
     def navigate_to_history(self):
-        self.driver.back()
+        self.slifox_driver.driver.execute_script("window.history.go(-1)")
 
     def download(self):
         self.dwell()
 
-    def open_tab():
+    def open_tab(self):
         # https://stackoverflow.com/questions/28431765/open-web-in-new-tab-selenium-python
-        self.driver.find_element_by_name('body').send_keys(Keys.CONTROL + 't')
+        #https://stackoverflow.com/questions/8833835/python-selenium-webdriver-drag-and-drop
+        print("opening tab")
+        #ActionChains(self.slifox_driver.driver).key_down(Keys.CONTROL).send_keys('t').key_up(Keys.CONTROL).perform()
+        self.slifox_driver.driver.find_element_by_tag_name('body').send_keys(Keys.CONTROL + 't')
+        self.slifox_driver.driver.find_element_by_tag_name('body').send_keys(Keys.CONTROL + Keys.TAB)
 
+        windows = self.slifox_driver.driver.window_handles
+        self.slifox_driver.driver.switch_to.window(windows[-1])
     #def switch_tab():
         
-    def close_tab():
-        self.driver.find_element_by_name('body').send_keys(Keys.CONTROL + 'w')
+    def close_tab(self):
+        self.slifox_driver.driver.find_element_by_tag_name('body').send_keys(Keys.CONTROL + 'w')
 
     # Misc helper functions
      
-    def get_domain(url):
+    def get_domain(self, url):
         parsed_url = urlparse(url)
         domain = '{uri.scheme}://{uri.netloc}/'.format(uri=parsed_url)
         return domain
@@ -154,30 +160,33 @@ class UserModel():
 class YouTubeBackgroundUser(UserModel):
     
     def start(self):
-        self.navigate_to_new_site("https://www.youtube.com/watch?v=QtTh6vgMzAY")
+        self.navigate_to_site("https://www.youtube.com/watch?v=QtTh6vgMzAY")
+        self.dwell()
         self.open_tab()
+        while True:
+            self.dwell()
+            self.action()
 
 
 
-#class SliFoxDriver(object):
-#        def start(self):
-#            logging.info("Starting Slifox Driver ...")
-#	    binary = FirefoxBinary('/home/iang/firefox/obj-x86_64-pc-linux-gnu/dist/bin/firefox')
-            #binary = FirefoxBinary('/home/aemhlori/slitheen-new/slifox/obj-x86_64-pc-linux-gnu/dist/bin/firefox')
-#            binary = FirefoxBinary('/home/slitheen/firefox/obj-x86_64-pc-linux-gnu/dist/bin/firefox')
-            #opts = Options()
-            #opts.headless = True
-#            self.driver = webdriver.Firefox(firefox_binary = binary, executable_path = "/home/slitheen/client/client/geckodriver-24/geckodriver")
-#            self.driver.set_page_load_timeout(30)
-#            logging.info("Slifox Driver started")
-#
-#        def stop(self):
-#            logging.info("Shutting down Slifox Driver ...")
-#            self.driver.close()
+class SliFoxDriver(object):
+        def __init__(self):
+            fp = webdriver.FirefoxProfile()
+            fp.set_preference("browser.tabs.remote.autostart", False)
+            fp.set_preference("browser.tabs.remote.autostart.1", False)
+            fp.set_preference("browser.tabs.remote.autostart.2", False)
+
+            logging.info("Starting Slifox Driver ...")
+            binary = FirefoxBinary('/home/slitheen/firefox/obj-x86_64-pc-linux-gnu/dist/bin/firefox')
+            self.driver = webdriver.Firefox(firefox_profile=fp, firefox_binary = binary, executable_path = "/home/slitheen/client/client/geckodriver-24/geckodriver")
+            self.driver.set_page_load_timeout(30)
+            logging.info("Slifox Driver started")
+
+        def stop(self):
+            logging.info("Shutting down Slifox Driver ...")
+            self.driver.close()
 
 
-	# Generate next action
-                    # Use Weibull Distribution to generate dwell time
 if __name__ == "__main__":
     logging.basicConfig(filename=LOGFILE, level=logging.DEBUG)
      
@@ -195,16 +204,16 @@ if __name__ == "__main__":
             print("Usage: python slifox_driver.py -u <user_mode>")
             sys.exit(0)
         elif opt == "-u":
-            user_mode = arg
+            if arg == 'background-video':
+                user_mode = YouTubeBackgroundUser(ACTION_PROBABILITIES)
+            elif arg == 'random':
+                user_mode = UserModel(ACTION_PROBABILITIES) 
+            else:
+                print("Invalid user model")
+                sys.exit(0)
         else:
             print("Unknown flag")
             sys.exit(0)
 
-
-    user = None
-    if user_mode == 'test':
-        user = YouTubeBackgroundUser(ACTION_PROBABILITIES)
-
-    while True:
-        user.dwell()
-        user.action()
+    user_mode.start()
+    
