@@ -20,7 +20,9 @@ import getopt
 LOGFILE = "slifox_driver.log"
 
 # Overt sites list
-OVERT_SITES = ["https://www.python.org", "https://www.youtube.com/", "https://www.instagram.com/beyonce/", "https://www.instagram.com/taylorswift", "https://www.instagram.com/explore/tags/cats/", "https://www.youtube.com/channel/UC4R8DWoMoI7CAwX8_LjQHig", "https://imgur.com/", "https://www.instagram.com/explore/tags/catsofinstagram/", "https://www.instagram.com/explore/tags/ilovecats/", "https://www.instagram.com/selenagomez/", "https://www.instagram.com/badgalriri", "https://www.instagram.com/arianagrande", "https://www.instagram.com/explore/tags/ootd/", "https://www.instagram.com/explore/tags/food/"]
+#OVERT_SITES = ["https://www.python.org", "https://www.youtube.com/", "https://www.instagram.com/beyonce/", "https://www.instagram.com/taylorswift", "https://www.instagram.com/explore/tags/cats/", "https://www.youtube.com/channel/UC4R8DWoMoI7CAwX8_LjQHig", "https://imgur.com/", "https://www.instagram.com/explore/tags/catsofinstagram/", "https://www.instagram.com/explore/tags/ilovecats/", "https://www.instagram.com/selenagomez/", "https://www.instagram.com/badgalriri", "https://www.instagram.com/arianagrande", "https://www.instagram.com/explore/tags/ootd/", "https://www.instagram.com/explore/tags/food/"]
+
+OVERT_SITES = ["https://b.slitheen.net/r/cats/", "https://b.slitheen.net/r/SupermodelCats/", "https://b.slitheen.net/r/cutecats/", "https://a.slitheen.net", "https://c.slitheen.net"]
 
 # Browser Actions
 ACTIONS = ["link", "new_addr", "history", "download", "nop", "new_tab"]
@@ -116,15 +118,18 @@ class UserModel():
                     try:
                         logging.info("Attempting to navigate to " + new_site)            	
                         self.slifox_driver.driver.get(new_site)
+                        self.save_cookies()
                         break
                     except TimeoutException as tex:
-                        logging.info("TimeoutException while trying to navigate to a new site")
+                        logging.info("TimeoutException while trying to navigate to" + str(new_site))
+
 
     def navigate_to_site(self, url):
         logging.info("Navigating to " + url)
         
         try:
             self.slifox_driver.driver.get(url)
+            self.save_cookies()
         except TimeoutException as tex:
             logging.error("TimeoutException: " + tex)
 
@@ -155,6 +160,11 @@ class UserModel():
         parsed_url = urlparse(url)
         domain = '{uri.scheme}://{uri.netloc}/'.format(uri=parsed_url)
         return domain
+
+    def save_cookies(self):
+        cookies = self.slifox_driver.driver.get_cookies()
+        for cookie in cookies:
+            self.slifox_driver.driver.add_cookie(cookie)
 
 
 class YouTubeBackgroundUser(UserModel):
