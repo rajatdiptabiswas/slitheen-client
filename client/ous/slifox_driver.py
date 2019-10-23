@@ -38,9 +38,7 @@ class UserModel():
         self.ACTIONS = ACTIONS
         self.ACTION_PROBABILITIES = action_probabilities
         
-        # Set up the Selenium Firefox Driver
-#        self.driver = SliFoxDriver()
-        
+        logging.basicConfig(format='%(asctime)s %(levelname)-8s %(message)s', level=logging.INFO, datefmt='%Y-%m-%d %H:%M:%S') 
         logging.info("Starting SliFox Driver ... ")
 
         self.slifox_driver = SliFoxDriver()
@@ -167,8 +165,12 @@ class UserModel():
             self.slifox_driver.driver.add_cookie(cookie)
 
 
-class YouTubeBackgroundUser(UserModel):
-    
+class BackgroundVideoUser(UserModel):
+    '''
+    This user model uses two tabs to simulate a user.
+    The first tab is a never ending YouTube live stream,
+    the other follow the base UserModel.
+    '''
     def start(self):
         self.navigate_to_site("https://www.youtube.com/watch?v=QtTh6vgMzAY")
         self.dwell()
@@ -179,6 +181,50 @@ class YouTubeBackgroundUser(UserModel):
 
 
 
+class VideoUser(UserModel):
+    '''
+    This user model uses one tab to watch YouTube videos.
+    Notably, this user model can detect when a video finnishes
+    and will click on a recommended video.
+    '''
+
+    def start(self):
+        self.navigate_to_site("https://www.youtube.com/watch?v=zlJDTxahav0")
+        while True:
+            self.detect_end_mode()
+            self.dwell()
+            self.start_new_video()
+
+    def start_new_video(self):
+        links = self.slifox_driver.driver.find_elements_by_xpath("//a[@href]")
+        video_links = []
+        for link in links:
+            href = link.get_attribute("href")
+            if 'watch?v=' in href:
+                video_links.append(href)
+        url = numpy.random.choice(video_links)
+
+        self.navigate_to_site(url)
+
+    def detect_end_mode(self):
+        script = """ var observer = new MutationObserver(classChangedCallback);
+                        observer.observe(document.getElementById('movie_player'), {
+                        attributes: true,
+                        attributeFilter: ['class'],
+                    });
+
+                    function classChangedCallback(mutations) {
+	
+                        var newIndex = mutations[0].target.className;
+	                console.log(newIndex.indexOf('ended-mode'));
+                        if ((newIndex.indexOf('ended-mode') != -1) && (newIndex.indexOf('ad-showing') == -1)) {
+                            die('video ended');
+                    }
+                }"""
+        self.slifox_driver.driver.execute_script(script)
+        logging.info("Detected that video finished")
+        print('video ended')
+
 class SliFoxDriver(object):
         def __init__(self):
             fp = webdriver.FirefoxProfile()
@@ -186,7 +232,7 @@ class SliFoxDriver(object):
             fp.set_preference("browser.tabs.remote.autostart.1", False)
             fp.set_preference("browser.tabs.remote.autostart.2", False)
 
-            fp.set_preference("general.useragent.override", "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:60.0) Gecko/20100101 Firefox/68.0")
+            fp.set_preference("general.useragent.override", "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:60.0) Gecko/20100101 Firefox/60.0")
             logging.info("Starting Slifox Driver ...")
             binary = FirefoxBinary('/home/slitheen/firefox/obj-x86_64-pc-linux-gnu/dist/bin/firefox')
             self.driver = webdriver.Firefox(firefox_profile=fp, firefox_binary = binary, executable_path = "/home/slitheen/client/client/geckodriver-24/geckodriver")
@@ -216,7 +262,9 @@ if __name__ == "__main__":
             sys.exit(0)
         elif opt == "-u":
             if arg == 'background-video':
-                user_mode = YouTubeBackgroundUser(ACTION_PROBABILITIES)
+                user_mode = BackgroundVideoUser(ACTION_PROBABILITIES)
+            if arg == 'video':
+                user_mode = VideoUser(ACTION_PROBABILITIES)
             elif arg == 'random':
                 user_mode = UserModel(ACTION_PROBABILITIES) 
             else:
