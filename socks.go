@@ -53,6 +53,8 @@ func (c *SocksConn) Close() error {
 type socksBlock struct {
 	stream uint16
 	length uint16
+        seq uint32
+        ack uint32
 	data   []byte
 }
 
@@ -68,6 +70,8 @@ func (h *socksBlock) Marshal(b []byte) error {
 
 	binary.LittleEndian.PutUint16(b[0:2], h.stream)
 	binary.LittleEndian.PutUint16(b[2:4], h.length)
+	binary.LittleEndian.PutUint32(b[4:8], h.seq)
+	binary.LittleEndian.PutUint32(b[8:12], h.ack)
 	return nil
 }
 
@@ -80,6 +84,8 @@ func (h *socksBlock) Unmarshal(b []byte) error {
 	h = new(socksBlock)
 	h.stream = binary.LittleEndian.Uint16(b[0:2])
 	h.length = binary.LittleEndian.Uint16(b[2:4])
+        h.seq = binary.LittleEndian.Uint32(b[4:8])
+        h.ack = binary.LittleEndian.Uint32(b[8:12])
 
 	return nil
 }
