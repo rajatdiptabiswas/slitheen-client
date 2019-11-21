@@ -1,4 +1,8 @@
 # SliFox Driver
+# TODO Fix up logging
+# TODO Fix up comments
+# TODO Remove javascript console logs
+# TODO Remove experiment mode
 
 import unittest
 # Selenium version 3.14.1
@@ -20,9 +24,10 @@ import getopt
 LOGFILE = "slifox_driver.log"
 
 # Overt sites list
-#OVERT_SITES = ["https://www.python.org", "https://www.youtube.com/", "https://www.instagram.com/beyonce/", "https://www.instagram.com/taylorswift", "https://www.instagram.com/explore/tags/cats/", "https://www.youtube.com/channel/UC4R8DWoMoI7CAwX8_LjQHig", "https://imgur.com/", "https://www.instagram.com/explore/tags/catsofinstagram/", "https://www.instagram.com/explore/tags/ilovecats/", "https://www.instagram.com/selenagomez/", "https://www.instagram.com/badgalriri", "https://www.instagram.com/arianagrande", "https://www.instagram.com/explore/tags/ootd/", "https://www.instagram.com/explore/tags/food/"]
+TEST_SITES = ["https://www.python.org", "https://www.youtube.com/", "https://www.instagram.com/beyonce/", "https://www.instagram.com/taylorswift", "https://www.instagram.com/explore/tags/cats/", "https://www.youtube.com/channel/UC4R8DWoMoI7CAwX8_LjQHig", "https://imgur.com/", "https://www.instagram.com/explore/tags/catsofinstagram/", "https://www.instagram.com/explore/tags/ilovecats/", "https://www.instagram.com/selenagomez/", "https://www.instagram.com/badgalriri", "https://www.instagram.com/arianagrande", "https://www.instagram.com/explore/tags/ootd/", "https://www.instagram.com/explore/tags/food/"]
 
 OVERT_SITES = ["https://b.slitheen.net/r/cats/", "https://b.slitheen.net/r/SupermodelCats/", "https://b.slitheen.net/r/cutecats/", "https://a.slitheen.net", "https://c.slitheen.net"]
+
 
 # Browser Actions
 ACTIONS = ["link", "new_addr", "history", "download", "nop", "new_tab"]
@@ -38,15 +43,12 @@ class UserModel():
         self.ACTIONS = ACTIONS
         self.ACTION_PROBABILITIES = action_probabilities
         
-        logging.basicConfig(format='%(asctime)s %(levelname)-8s %(message)s', level=logging.INFO, datefmt='%Y-%m-%d %H:%M:%S') 
-        logging.info("Starting SliFox Driver ... ")
-
         self.slifox_driver = SliFoxDriver()
     
     def start(self):
         while True:
-            self.dwell()
             self.action()
+            self.dwell()
             
     def stop(self):
         self.slifox_driver.driver.close()
@@ -100,21 +102,20 @@ class UserModel():
             if domain in current_url:
                 logging.debug("Navigating to " + link_url)
                 try:
-                    logging.debug("Attempting to navigate within site ...")
                     self.slifox_driver.driver.get(link_url)
                     break
                 except TimeoutException as tex:
                     logging.info("TimeoutException while navigating within site")
 
     def navigate_to_random_site(self):
-            logging.info("Navigating to new site ... ")
+            logging.info("Navigating to random site ... ")
              
             while True:
                 new_site = random.choice(OVERT_SITES)
                 current_domain = self.get_domain(self.slifox_driver.driver.current_url)
                 if new_site not in current_domain:
                     try:
-                        logging.info("Attempting to navigate to " + new_site)            	
+                        logging.info("Navigating to " + new_site)            	
                         self.slifox_driver.driver.get(new_site)
                         self.save_cookies()
                         break
@@ -140,7 +141,7 @@ class UserModel():
     def open_tab(self):
         # https://stackoverflow.com/questions/28431765/open-web-in-new-tab-selenium-python
         #https://stackoverflow.com/questions/8833835/python-selenium-webdriver-drag-and-drop
-        print("opening tab")
+        logging.info("Opening tab")
         #ActionChains(self.slifox_driver.driver).key_down(Keys.CONTROL).send_keys('t').key_up(Keys.CONTROL).perform()
         self.slifox_driver.driver.find_element_by_tag_name('body').send_keys(Keys.CONTROL + 't')
         self.slifox_driver.driver.find_element_by_tag_name('body').send_keys(Keys.CONTROL + Keys.TAB)
@@ -160,6 +161,7 @@ class UserModel():
         return domain
 
     def save_cookies(self):
+        logging.info("Saving cookies")
         cookies = self.slifox_driver.driver.get_cookies()
         for cookie in cookies:
             self.slifox_driver.driver.add_cookie(cookie)
@@ -172,7 +174,8 @@ class BackgroundVideoUser(UserModel):
     the other follow the base UserModel.
     '''
     def start(self):
-        self.navigate_to_site("https://www.youtube.com/watch?v=QtTh6vgMzAY")
+        logging.info("Starting background video ...")
+        self.navigate_to_site("https://www.youtube.com/watch?v=QtTh6vgMzAY") # This is the neverending bob's burgers live stream
         self.dwell()
         self.open_tab()
         while True:
@@ -189,13 +192,17 @@ class VideoUser(UserModel):
     '''
 
     def start(self):
-        self.navigate_to_site("https://www.youtube.com/watch?v=zlJDTxahav0")
+        self.navigate_to_site("https://www.youtube.com/watch?v=zudkSqxBq8s") # TODO remove this hard coded
+	# Turn off Autoplay
+        self.slifox_driver.driver.find_element_by_xpath("//div[@id='toggleButton']").click()
+        logging.info("Disabled Autoplay")
         while True:
             self.detect_end_mode()
             self.dwell()
             self.start_new_video()
 
     def start_new_video(self):
+        logging.info("Starting new video")
         links = self.slifox_driver.driver.find_elements_by_xpath("//a[@href]")
         video_links = []
         for link in links:
@@ -207,23 +214,30 @@ class VideoUser(UserModel):
         self.navigate_to_site(url)
 
     def detect_end_mode(self):
-        script = """ var observer = new MutationObserver(classChangedCallback);
-                        observer.observe(document.getElementById('movie_player'), {
+        script = """ var done = arguments[0];
+                     
+                     var observer = new MutationObserver(classChangedCallback);
+                     observer.observe(document.getElementById('movie_player'), {
                         attributes: true,
                         attributeFilter: ['class'],
                     });
 
-                    function classChangedCallback(mutations) {
-	
+                    function classChangedCallback(mutations, observer) {
+                        console.log("ugh");
                         var newIndex = mutations[0].target.className;
-	                console.log(newIndex.indexOf('ended-mode'));
+                        console.log(newIndex.indexOf('ended-mode'));
                         if ((newIndex.indexOf('ended-mode') != -1) && (newIndex.indexOf('ad-showing') == -1)) {
-                            die('video ended');
+                            console.log('video ended');
+                            observer.disconnect();
+                            done("foo")
                     }
                 }"""
-        self.slifox_driver.driver.execute_script(script)
+        ret = self.slifox_driver.driver.execute_async_script(script)
+        logging.info("FINISHED JS EXECUTION")
+        print(ret)
         logging.info("Detected that video finished")
         print('video ended')
+
 
 class SliFoxDriver(object):
         def __init__(self):
@@ -237,6 +251,7 @@ class SliFoxDriver(object):
             binary = FirefoxBinary('/home/slitheen/firefox/obj-x86_64-pc-linux-gnu/dist/bin/firefox')
             self.driver = webdriver.Firefox(firefox_profile=fp, firefox_binary = binary, executable_path = "/home/slitheen/client/client/geckodriver-24/geckodriver")
             self.driver.set_page_load_timeout(30)
+            self.driver.set_script_timeout(50000000)
             logging.info("Slifox Driver started")
 
         def stop(self):
@@ -245,14 +260,16 @@ class SliFoxDriver(object):
 
 
 if __name__ == "__main__":
-    logging.basicConfig(filename=LOGFILE, level=logging.DEBUG)
-     
+    logging.basicConfig(filename=LOGFILE, format='%(asctime)s.%(msecs)03d %(levelname)s %(module)s - %(funcName)s: %(message)s', level=logging.DEBUG, datefmt='%Y-%m-%d %H:%M:%S') 
+   
+    logging.info("<<<<< STARTING >>>>>")	  
     try:
+	# -t := test mode (uses test overt sites, not the slitheen.net ones)
         # -u := user mode
         # -h := help
         opts, args = getopt.getopt(sys.argv[1:], "u:h")
     except getopt.GetoptError:
-        print("Usage: python slifox_driver.py -u <user_mode>")
+        print("Usage: python slifox_driver.py -h | -e | -u <user_mode>")
         sys.exit(2)
 
     user_mode = None
@@ -260,10 +277,13 @@ if __name__ == "__main__":
         if opt == "-h":
             print("Usage: python slifox_driver.py -u <user_mode>")
             sys.exit(0)
+        elif opt == "-e":
+            logging.debug("EXPERIMENT MODE")
+            print("EXPERIMENT MODE")
         elif opt == "-u":
-            if arg == 'background-video':
+            if arg == 'bv':
                 user_mode = BackgroundVideoUser(ACTION_PROBABILITIES)
-            if arg == 'video':
+            elif arg == 'video':
                 user_mode = VideoUser(ACTION_PROBABILITIES)
             elif arg == 'random':
                 user_mode = UserModel(ACTION_PROBABILITIES) 
@@ -271,8 +291,8 @@ if __name__ == "__main__":
                 print("Invalid user model")
                 sys.exit(0)
         else:
-            print("Unknown flag")
-            sys.exit(0)
+            print("Unknown flag: " + opt)
+            sys.exit(2)
 
     user_mode.start()
     
