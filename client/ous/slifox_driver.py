@@ -143,12 +143,15 @@ class UserModel():
         #https://stackoverflow.com/questions/8833835/python-selenium-webdriver-drag-and-drop
         logging.info("Opening tab")
         #ActionChains(self.slifox_driver.driver).key_down(Keys.CONTROL).send_keys('t').key_up(Keys.CONTROL).perform()
-        self.slifox_driver.driver.find_element_by_tag_name('body').send_keys(Keys.CONTROL + 't')
-        self.slifox_driver.driver.find_element_by_tag_name('body').send_keys(Keys.CONTROL + Keys.TAB)
+        try:
+            self.slifox_driver.driver.find_element_by_tag_name('body').send_keys(Keys.CONTROL + 't')
+            self.slifox_driver.driver.find_element_by_tag_name('body').send_keys(Keys.CONTROL + Keys.TAB)
+            windows = self.slifox_driver.driver.window_handles
+            self.slifox_driver.driver.switch_to.window(windows[-1])
 
-        windows = self.slifox_driver.driver.window_handles
-        self.slifox_driver.driver.switch_to.window(windows[-1])
-    #def switch_tab():
+        except Excetion as e:
+            logging.error(e)
+
         
     def close_tab(self):
         self.slifox_driver.driver.find_element_by_tag_name('body').send_keys(Keys.CONTROL + 'w')
@@ -248,11 +251,12 @@ class SliFoxDriver(object):
 
             fp.set_preference("general.useragent.override", "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:60.0) Gecko/20100101 Firefox/60.0")
             logging.info("Starting Slifox Driver ...")
-            binary = FirefoxBinary('/home/slitheen/firefox/obj-x86_64-pc-linux-gnu/dist/bin/firefox')
-            self.driver = webdriver.Firefox(firefox_profile=fp, firefox_binary = binary, executable_path = "/home/slitheen/client/client/geckodriver-24/geckodriver")
+#            binary = FirefoxBinary('/home/slitheen/firefox/obj-x86_64-pc-linux-gnu/dist/bin/firefox')
+            self.driver = webdriver.Firefox(firefox_profile=fp, executable_path = "/home/slitheen/client/client/geckodriver-26/geckodriver") #  firefox_binary = binary, 
             self.driver.set_page_load_timeout(30)
             self.driver.set_script_timeout(50000000)
             logging.info("Slifox Driver started")
+            print(self.driver.capabilities['browserVersion'])
 
         def stop(self):
             logging.info("Shutting down Slifox Driver ...")
