@@ -275,6 +275,10 @@ if __name__ == "__main__":
     except getopt.GetoptError:
         print("Usage: python slifox_driver.py -h | -e | -u <user_mode>")
         sys.exit(2)
+    
+    if len(opts) == 0:
+        print("Usage: python3 slifox_driver.py -h | -e | -e <user_mode>")
+        sys.exit(2)
 
     user_mode = None
     for opt, arg in opts:
