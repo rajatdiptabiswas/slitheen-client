@@ -170,6 +170,17 @@ class UserModel():
             self.slifox_driver.driver.add_cookie(cookie)
 
 
+class BasicModel(UserModel):
+    '''
+    This user model loads the same site every second.
+    '''
+
+    def start(self):
+        logging.info("Starting basic mode ... ")
+        while True:
+           self.navigate_to_site("https://www.google.com") # AL - Can be changed
+           time.sleep(1)
+	
 class BackgroundVideoUser(UserModel):
     '''
     This user model uses two tabs to simulate a user.
@@ -256,7 +267,7 @@ class SliFoxDriver(object):
             self.driver.set_page_load_timeout(30)
             self.driver.set_script_timeout(50000000)
             logging.info("Slifox Driver started")
-            print(self.driver.capabilities['browserVersion'])
+            #print(self.driver.capabilities['browserVersion'])
 
         def stop(self):
             logging.info("Shutting down Slifox Driver ...")
@@ -295,6 +306,8 @@ if __name__ == "__main__":
                 user_mode = VideoUser(ACTION_PROBABILITIES)
             elif arg == 'random':
                 user_mode = UserModel(ACTION_PROBABILITIES) 
+            elif arg == 'basic':
+                user_mode = BasicModel(ACTION_PROBABILITIES)
             else:
                 print("Invalid user model")
                 sys.exit(0)
