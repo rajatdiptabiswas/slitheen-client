@@ -142,8 +142,8 @@ func (s *Server) serveConn(conn *SocksConn) {
 	copier := func(dst io.WriteCloser, src io.ReadCloser) {
 		defer wg.Done()
 		io.Copy(dst, src)
-		dst.Close()
-		src.Close()
+		conn.Close()
+		conn.pr.Close()
 	}
 	wg.Add(2)
 	go copier(conn, conn.pr)
