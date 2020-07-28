@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"math/rand"
 	"net"
@@ -28,10 +27,10 @@ type SocksConn struct {
 
 // put into socksBlock structure
 func (c *SocksConn) Read(b []byte) (int, error) {
-	if len(b) < 4 {
+	if len(b) < 12 {
 		return 0, fmt.Errorf("Buffer not big enough for whole block")
 	}
-	n, err := c.conn.Read(b[4:])
+	n, err := c.conn.Read(b[12:])
 	if err != nil {
 		return n, err
 	}
@@ -40,7 +39,9 @@ func (c *SocksConn) Read(b []byte) (int, error) {
 	block.stream = c.stream
 	block.length = uint16(n)
 	err = block.Marshal(b)
-	return n + 4, nil
+
+	log.Printf("Bundled a block of size %d", n)
+	return n + 12, nil
 }
 
 func (c *SocksConn) Write(b []byte) (int, error) {
@@ -200,23 +201,12 @@ func (s *Server) serveConn(conn *SocksConn) {
 // reads SOCKS data from a channel and writes to OUS
 func (s *Server) multiplex(conn net.Conn) {
 	defer s.pr.Close()
+	defer conn.Close()
 
-	for { //TODO: this probably needs to be fixed
-		//TODO: read from s.pr
-		bytes, err := ioutil.ReadAll(&io.LimitedReader{R: s.pr, N: 65535})
-		if err != nil {
-			return
-		}
-		n, err := conn.Write(bytes)
-		if err != nil {
-			return //TODO: fix
-		}
-		log.Printf("Wrote %d bytes to OUS", n)
-		if n < len(bytes) {
-			println("Error: short write") //TODO: figure out how to handle this
-		}
-
+	if _, err := io.Copy(conn, s.pr); err != nil {
+		log.Printf("Error copying from multiplex pipe to OUS: %s", err.Error())
 	}
+
 }
 
 // reads data from OUS connection and writes to socks channel
@@ -225,12 +215,12 @@ func (s *Server) demultiplex(conn net.Conn) {
 
 	for {
 		var block *socksBlock
-		infoBytes := make([]byte, 4, 4)
-		n, err := conn.Read(infoBytes)
+		infoBytes := make([]byte, 12)
+		n, err := conn.Read(infoBytes[:])
 		if err != nil {
 			return
 		}
-		if n < 4 {
+		if n < 12 {
 			println("Error: short read")
 		}
 		block.Unmarshal(infoBytes)
