@@ -128,9 +128,54 @@ func (s *Server) ListenAndServe(addr string) error {
 			}
 
 			s.streams[stream] = sconn
+			if err := establishSOCKSConnection(conn); err != nil {
+				log.Printf("Error establishing SOCKS connection: %s", err.Error())
+				conn.Close()
+				return
+			}
 			s.serveConn(sconn)
 		}()
 	}
+}
+
+func establishSOCKSConnection(conn net.Conn) error {
+
+	// Check SOCKS version
+	version := make([]byte, 1)
+	if _, err := io.ReadFull(conn, version[:]); err != nil {
+		return err
+	}
+
+	if version[0] != uint8(5) {
+		return fmt.Errorf("Received unsupported SOCKS version %d", version[0])
+	}
+
+	// Check methods
+	methods := make([]byte, 1)
+	if _, err := io.ReadFull(conn, methods[:]); err != nil {
+		return err
+	}
+
+	var responded bool
+	for i := 0; i < int(uint8(methods[0])); i++ {
+		if _, err := conn.Write([]byte{0x05, 0x00}); err != nil {
+			return err
+		}
+		responded = true
+	}
+
+	if !responded {
+		if _, err := conn.Write([]byte{0x05, 0xFF}); err != nil {
+			return err
+		}
+	}
+
+	// Accept connect request
+	if _, err := conn.Write([]byte{0x05, 0x00, 0x00, 0x01}); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // Sends upstream data from the socks connection to the multiplexer, and
