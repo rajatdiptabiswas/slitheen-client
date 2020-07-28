@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"math/rand"
 	"net"
 	"sync"
@@ -53,8 +54,8 @@ func (c *SocksConn) Close() error {
 type socksBlock struct {
 	stream uint16
 	length uint16
-        seq uint32
-        ack uint32
+	seq    uint32
+	ack    uint32
 	data   []byte
 }
 
@@ -84,8 +85,8 @@ func (h *socksBlock) Unmarshal(b []byte) error {
 	h = new(socksBlock)
 	h.stream = binary.LittleEndian.Uint16(b[0:2])
 	h.length = binary.LittleEndian.Uint16(b[2:4])
-        h.seq = binary.LittleEndian.Uint32(b[4:8])
-        h.ack = binary.LittleEndian.Uint32(b[8:12])
+	h.seq = binary.LittleEndian.Uint32(b[4:8])
+	h.ack = binary.LittleEndian.Uint32(b[8:12])
 
 	return nil
 }
@@ -101,19 +102,18 @@ func NewServer() *Server {
 
 func (s *Server) ListenAndServe(addr string) error {
 	l, err := net.Listen("tcp", addr)
+	log.Printf("Listening on %s", addr)
 
 	if err != nil {
+		log.Printf("Error setting up socks listener: %s", err.Error())
 		return err
 	}
 
-	return s.Serve(l)
-}
-
-func (s *Server) Serve(l net.Listener) error {
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	for {
 		conn, err := l.Accept()
 		if err != nil {
+			log.Printf("Error accepting new connection: %s", err.Error())
 			return err
 		}
 
@@ -138,6 +138,7 @@ func (s *Server) Serve(l net.Listener) error {
 func (s *Server) serveConn(conn *SocksConn) {
 
 	var wg sync.WaitGroup
+	log.Printf("Started copy loop for stream %d", conn.stream)
 	copier := func(dst io.WriteCloser, src io.ReadCloser) {
 		defer wg.Done()
 		io.Copy(dst, src)
@@ -148,6 +149,7 @@ func (s *Server) serveConn(conn *SocksConn) {
 	go copier(conn, conn.pr)
 	go copier(s.pw, conn)
 	wg.Wait()
+	log.Printf("Stopped copy loop for stream %d", conn.stream)
 }
 
 // reads SOCKS data from a channel and writes to OUS
@@ -164,6 +166,7 @@ func (s *Server) multiplex(conn net.Conn) {
 		if err != nil {
 			return //TODO: fix
 		}
+		log.Printf("Wrote %d bytes to OUS", n)
 		if n < len(bytes) {
 			println("Error: short write") //TODO: figure out how to handle this
 		}
@@ -215,5 +218,5 @@ func main() {
 	// go routine that demultiplexes SOCKS connections
 	go socksServer.demultiplex(conn)
 
-	socksServer.ListenAndServe("127.0.0.1:1080")
+	socksServer.ListenAndServe(":1080")
 }
