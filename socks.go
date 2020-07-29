@@ -7,9 +7,14 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 )
+
+var sigChan chan os.Signal
 
 type Server struct {
 	// map of stream IDs to SOCKS connections
@@ -95,15 +100,7 @@ func NewServer() *Server {
 	}
 }
 
-func (s *Server) ListenAndServe(addr string) error {
-	l, err := net.Listen("tcp", addr)
-	log.Printf("Listening on %s", addr)
-
-	if err != nil {
-		log.Printf("Error setting up socks listener: %s", err.Error())
-		return err
-	}
-
+func (s *Server) socksAcceptLoop(l net.Listener) error {
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	for {
 		conn, err := l.Accept()
@@ -135,6 +132,21 @@ func (s *Server) ListenAndServe(addr string) error {
 			s.serveConn(request, sconn)
 		}()
 	}
+}
+
+func (s *Server) ListenAndServe(addr string) (net.Listener, error) {
+	l, err := net.Listen("tcp", addr)
+	log.Printf("Listening on %s", addr)
+
+	if err != nil {
+		log.Printf("Error setting up socks listener: %s", err.Error())
+		return nil, err
+	}
+
+	go s.socksAcceptLoop(l)
+
+	return l, nil
+
 }
 
 func readRequest(conn net.Conn) ([]byte, error) {
@@ -281,6 +293,7 @@ func (s *Server) multiplex(conn net.Conn) {
 	if _, err := io.Copy(conn, s.pr); err != nil {
 		log.Printf("Error copying from multiplex pipe to OUS: %s", err.Error())
 	}
+	sigChan <- syscall.SIGTERM
 
 }
 
@@ -295,21 +308,21 @@ func (s *Server) demultiplex(conn net.Conn) {
 		n, err := io.ReadFull(conn, infoBytes[:])
 		if err != nil {
 			log.Printf("Error reading downstream data: %s", err.Error())
-			return
+			break
 		}
 		if n < 4 {
 			log.Printf("Error: short read")
 		}
 		block, err := Unmarshal(infoBytes)
 		if err != nil {
-			return
+			break
 		}
 		log.Printf("Received %d bytes for stream %d", block.length, block.stream)
 
 		bytes := make([]byte, block.length, block.length)
 		n, err = conn.Read(bytes)
 		if err != nil {
-			return
+			break
 		}
 		if uint16(n) < block.length {
 			log.Printf("Error: short read")
@@ -322,10 +335,14 @@ func (s *Server) demultiplex(conn net.Conn) {
 			stream.pw.Write(bytes)
 		}
 	}
+	sigChan <- syscall.SIGTERM
 }
 
 func main() {
 	println("Hello.")
+
+	sigChan = make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGTERM)
 
 	//open a connection to the OUS
 	conn, err := net.Dial("tcp", "127.0.0.1:57173")
@@ -340,5 +357,14 @@ func main() {
 	// go routine that demultiplexes SOCKS connections
 	go socksServer.demultiplex(conn)
 
-	socksServer.ListenAndServe(":1080")
+	l, err := socksServer.ListenAndServe(":1080")
+	if err != nil {
+		log.Printf("Error connecting to OUS: %s", err.Error())
+		return
+	}
+
+	<-sigChan
+	l.Close()
+	conn.Close()
+
 }
