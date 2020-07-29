@@ -208,7 +208,7 @@ func readRequest(conn net.Conn) ([]byte, error) {
 	// Accept connect request
 	response := make([]byte, 10, 10)
 	response[0] = 0x05
-	response[3] = request[1]
+	response[3] = 0x01
 	if _, err := conn.Write(response); err != nil {
 		log.Printf("Error accepting connect request: %s", err.Error())
 	}
@@ -240,11 +240,14 @@ func establishSOCKSConnection(conn net.Conn) error {
 	}
 
 	var responded bool
-	for _, _ = range methods {
-		if _, err := conn.Write([]byte{0x05, 0x00}); err != nil {
-			return err
+	for _, method := range methods {
+		if method == 0x00 {
+			if _, err := conn.Write([]byte{0x05, 0x00}); err != nil {
+				return err
+			}
+			responded = true
+			break
 		}
-		responded = true
 	}
 
 	if !responded {
