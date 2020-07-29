@@ -27,10 +27,10 @@ type SocksConn struct {
 
 // put into socksBlock structure
 func (c *SocksConn) Read(b []byte) (int, error) {
-	if len(b) < 12 {
+	if len(b) < 4 {
 		return 0, fmt.Errorf("Buffer not big enough for whole block")
 	}
-	n, err := c.conn.Read(b[12:])
+	n, err := c.conn.Read(b[4:])
 	if err != nil {
 		return n, err
 	}
@@ -41,7 +41,7 @@ func (c *SocksConn) Read(b []byte) (int, error) {
 	err = block.Marshal(b)
 
 	log.Printf("Bundled a block of size %d", n)
-	return n + 12, nil
+	return n + 4, nil
 }
 
 func (c *SocksConn) Write(b []byte) (int, error) {
@@ -55,8 +55,6 @@ func (c *SocksConn) Close() error {
 type socksBlock struct {
 	stream uint16
 	length uint16
-	seq    uint32
-	ack    uint32
 	data   []byte
 }
 
@@ -72,8 +70,6 @@ func (h *socksBlock) Marshal(b []byte) error {
 
 	binary.LittleEndian.PutUint16(b[0:2], h.stream)
 	binary.LittleEndian.PutUint16(b[2:4], h.length)
-	binary.LittleEndian.PutUint32(b[4:8], h.seq)
-	binary.LittleEndian.PutUint32(b[8:12], h.ack)
 	return nil
 }
 
@@ -86,8 +82,6 @@ func (h *socksBlock) Unmarshal(b []byte) error {
 	h = new(socksBlock)
 	h.stream = binary.LittleEndian.Uint16(b[0:2])
 	h.length = binary.LittleEndian.Uint16(b[2:4])
-	h.seq = binary.LittleEndian.Uint32(b[4:8])
-	h.ack = binary.LittleEndian.Uint32(b[8:12])
 
 	return nil
 }
@@ -134,9 +128,81 @@ func (s *Server) ListenAndServe(addr string) error {
 				conn.Close()
 				return
 			}
-			s.serveConn(sconn)
+			request, err := readRequest(conn)
+			if err != nil {
+				log.Printf("Error reading in new connect request: %s", err.Error())
+			}
+			s.serveConn(request, sconn)
 		}()
 	}
+}
+
+func readRequest(conn net.Conn) ([]byte, error) {
+	request := make([]byte, 3)
+
+	// Read in request header
+	if _, err := io.ReadFull(conn, request[:]); err != nil {
+		return nil, err
+	}
+
+	if request[0] != 0x05 {
+		return nil, fmt.Errorf("invalid SOCKS version")
+	}
+
+	// Read in address
+	addrType := make([]byte, 1)
+	if _, err := io.ReadFull(conn, addrType[:]); err != nil {
+		return nil, err
+	}
+	request = append(request, addrType...)
+
+	switch addrType[0] {
+	case 0x01:
+		// IPv4
+		addr := make([]byte, 4)
+		if _, err := io.ReadFull(conn, addr[:]); err != nil {
+			return nil, err
+		}
+		request = append(request, addr...)
+	case 0x03:
+		// Domain name
+		addrLen := make([]byte, 1)
+		if _, err := io.ReadFull(conn, addrLen[:]); err != nil {
+			return nil, err
+		}
+		request = append(request, addrLen...)
+		addr := make([]byte, int(addrLen[0]))
+		if _, err := io.ReadFull(conn, addr[:]); err != nil {
+			return nil, err
+		}
+		request = append(request, addr...)
+	case 0x04:
+		// IPv6
+		addr := make([]byte, 16)
+		if _, err := io.ReadFull(conn, addr[:]); err != nil {
+			return nil, err
+		}
+		request = append(request, addr...)
+	default:
+		return nil, fmt.Errorf("unrecognized address type: 0x%x", addrType[0])
+	}
+
+	port := make([]byte, 2)
+	if _, err := io.ReadFull(conn, port[:]); err != nil {
+		return nil, err
+	}
+	request = append(request, port...)
+
+	// Accept connect request
+	response := make([]byte, 10, 10)
+	response[0] = 0x05
+	response[3] = request[1]
+	if _, err := conn.Write(response); err != nil {
+		log.Printf("Error accepting connect request: %s", err.Error())
+	}
+
+	return request, nil
+
 }
 
 func establishSOCKSConnection(conn net.Conn) error {
@@ -152,13 +218,17 @@ func establishSOCKSConnection(conn net.Conn) error {
 	}
 
 	// Check methods
-	methods := make([]byte, 1)
+	numMethods := make([]byte, 1)
+	if _, err := io.ReadFull(conn, numMethods[:]); err != nil {
+		return err
+	}
+	methods := make([]byte, int(numMethods[0]))
 	if _, err := io.ReadFull(conn, methods[:]); err != nil {
 		return err
 	}
 
 	var responded bool
-	for i := 0; i < int(uint8(methods[0])); i++ {
+	for _, _ = range methods {
 		if _, err := conn.Write([]byte{0x05, 0x00}); err != nil {
 			return err
 		}
@@ -171,17 +241,22 @@ func establishSOCKSConnection(conn net.Conn) error {
 		}
 	}
 
-	// Accept connect request
-	if _, err := conn.Write([]byte{0x05, 0x00, 0x00, 0x01}); err != nil {
-		return err
-	}
-
 	return nil
 }
 
 // Sends upstream data from the socks connection to the multiplexer, and
 // return demultiplexed downstream data to the socks connection
-func (s *Server) serveConn(conn *SocksConn) {
+func (s *Server) serveConn(request []byte, conn *SocksConn) {
+
+	// Send request to OUS
+	b := make([]byte, 4)
+	block := new(socksBlock)
+	block.stream = conn.stream
+	block.length = uint16(len(request))
+	block.Marshal(b)
+	if _, err := s.pw.Write(append(b, request...)); err != nil {
+		log.Printf("Error relaying connect request: %s", err.Error())
+	}
 
 	var wg sync.WaitGroup
 	log.Printf("Started copy loop for stream %d", conn.stream)
@@ -215,12 +290,12 @@ func (s *Server) demultiplex(conn net.Conn) {
 
 	for {
 		var block *socksBlock
-		infoBytes := make([]byte, 12)
+		infoBytes := make([]byte, 4)
 		n, err := conn.Read(infoBytes[:])
 		if err != nil {
 			return
 		}
-		if n < 12 {
+		if n < 4 {
 			println("Error: short read")
 		}
 		block.Unmarshal(infoBytes)
