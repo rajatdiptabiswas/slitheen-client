@@ -74,16 +74,16 @@ func (h *socksBlock) Marshal(b []byte) error {
 }
 
 // Populate a slitheen block struct with bytes b
-func (h *socksBlock) Unmarshal(b []byte) error {
+func Unmarshal(b []byte) (*socksBlock, error) {
 	if len(b) < 4 {
-		return fmt.Errorf("Not enough bytes to parse block")
+		return nil, fmt.Errorf("Not enough bytes to parse block")
 	}
 
-	h = new(socksBlock)
+	h := new(socksBlock)
 	h.stream = binary.LittleEndian.Uint16(b[0:2])
-	h.length = binary.LittleEndian.Uint16(b[2:4])
+	h.length = binary.BigEndian.Uint16(b[2:4])
 
-	return nil
+	return h, nil
 }
 
 func NewServer() *Server {
@@ -287,18 +287,24 @@ func (s *Server) multiplex(conn net.Conn) {
 // reads data from OUS connection and writes to socks channel
 func (s *Server) demultiplex(conn net.Conn) {
 	defer conn.Close()
+	defer s.pr.Close()
+	defer s.pw.Close()
 
 	for {
-		var block *socksBlock
 		infoBytes := make([]byte, 4)
-		n, err := conn.Read(infoBytes[:])
+		n, err := io.ReadFull(conn, infoBytes[:])
 		if err != nil {
+			log.Printf("Error reading downstream data: %s", err.Error())
 			return
 		}
 		if n < 4 {
-			println("Error: short read")
+			log.Printf("Error: short read")
 		}
-		block.Unmarshal(infoBytes)
+		block, err := Unmarshal(infoBytes)
+		if err != nil {
+			return
+		}
+		log.Printf("Received %d bytes for stream %d", block.length, block.stream)
 
 		bytes := make([]byte, block.length, block.length)
 		n, err = conn.Read(bytes)
@@ -306,9 +312,15 @@ func (s *Server) demultiplex(conn net.Conn) {
 			return
 		}
 		if uint16(n) < block.length {
-			println("Error: short read")
+			log.Printf("Error: short read")
 		}
-		s.streams[block.stream].pw.Write(bytes)
+
+		stream, ok := s.streams[block.stream]
+		if !ok {
+			log.Printf("Error: couldn't find stream %d", block.stream)
+		} else {
+			stream.pw.Write(bytes)
+		}
 	}
 }
 
