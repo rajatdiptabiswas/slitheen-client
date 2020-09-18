@@ -344,6 +344,8 @@ func (s *Server) demultiplex(conn net.Conn) {
 func main() {
 	println("Hello.")
 
+	socksProxyPort = os.Args[1]
+
 	sigChan = make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGTERM)
 
@@ -360,7 +362,7 @@ func main() {
 	// go routine that demultiplexes SOCKS connections
 	go socksServer.demultiplex(conn)
 
-	l, err := socksServer.ListenAndServe(":1080")
+	l, err := socksServer.ListenAndServe(":" + socksProxyPort)
 	if err != nil {
 		log.Printf("Error connecting to OUS: %s", err.Error())
 		return
