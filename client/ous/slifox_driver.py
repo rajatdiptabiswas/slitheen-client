@@ -262,17 +262,19 @@ class SliFoxDriver(object):
 
             fp.set_preference("general.useragent.override", "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:60.0) Gecko/20100101 Firefox/60.0")
             logging.info("Starting Slifox Driver ...")
+            
             binary = FirefoxBinary('/home/slitheen/firefox/obj-x86_64-pc-linux-gnu/dist/bin/firefox')
             self.driver = webdriver.Firefox(firefox_profile=fp, executable_path = "/home/slitheen/client/client/geckodriver-26/geckodriver", firefox_binary = binary) 
             self.driver.set_page_load_timeout(30)
             self.driver.set_script_timeout(50000000)
             logging.info("Slifox Driver started")
-            #print(self.driver.capabilities['browserVersion'])
 
         def stop(self):
             logging.info("Shutting down Slifox Driver ...")
             self.driver.close()
 
+def print_usage():
+    print("Usage: python slifox_driver.py -h | -u <user_mode>")
 
 if __name__ == "__main__":
     logging.basicConfig(filename=LOGFILE, format='%(asctime)s.%(msecs)03d %(levelname)s %(module)s - %(funcName)s: %(message)s', level=logging.DEBUG, datefmt='%Y-%m-%d %H:%M:%S') 
@@ -284,21 +286,18 @@ if __name__ == "__main__":
         # -h := help
         opts, args = getopt.getopt(sys.argv[1:], "u:h")
     except getopt.GetoptError:
-        print("Usage: python slifox_driver.py -h | -e | -u <user_mode>")
+        print_usage()
         sys.exit(2)
     
     if len(opts) == 0:
-        print("Usage: python3 slifox_driver.py -h | -e | -e <user_mode>")
+        print_usage()
         sys.exit(2)
 
     user_mode = None
     for opt, arg in opts:
         if opt == "-h":
-            print("Usage: python slifox_driver.py -u <user_mode>")
+            print_usage()
             sys.exit(0)
-        elif opt == "-e":
-            logging.debug("EXPERIMENT MODE")
-            print("EXPERIMENT MODE")
         elif opt == "-u":
             if arg == 'bv':
                 user_mode = BackgroundVideoUser(ACTION_PROBABILITIES)
