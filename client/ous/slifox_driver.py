@@ -2,7 +2,6 @@
 # TODO Fix up logging
 # TODO Fix up comments
 # TODO Remove javascript console logs
-# TODO Remove experiment mode
 
 import unittest
 # Selenium version 3.14.1
@@ -256,17 +255,28 @@ class VideoUser(UserModel):
 class SliFoxDriver(object):
         def __init__(self):
             fp = webdriver.FirefoxProfile()
+            
+            # Enable opening tabs
             fp.set_preference("browser.tabs.remote.autostart", False)
             fp.set_preference("browser.tabs.remote.autostart.1", False)
             fp.set_preference("browser.tabs.remote.autostart.2", False)
 
+            # Set user agent
             fp.set_preference("general.useragent.override", "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:60.0) Gecko/20100101 Firefox/60.0")
-            logging.info("Starting Slifox Driver ...")
-            
+            # Disable HTTP/2 and TLS1.3
+            fp.set_preference("security.tls.version.max", 3)
+            fp.set_preference("network.http.spdy.enabled.http2", False)
+
+            # Get Slifox Binary
             binary = FirefoxBinary('/home/slitheen/firefox/obj-x86_64-pc-linux-gnu/dist/bin/firefox')
+            
+            # Instantiate driver with the correct geckodriver version
             self.driver = webdriver.Firefox(firefox_profile=fp, executable_path = "/home/slitheen/client/client/geckodriver-26/geckodriver", firefox_binary = binary) 
+            
+            # Set page and script timeouts
             self.driver.set_page_load_timeout(30)
             self.driver.set_script_timeout(50000000)
+            
             logging.info("Slifox Driver started")
 
         def stop(self):
