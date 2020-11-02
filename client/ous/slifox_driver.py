@@ -103,8 +103,8 @@ class UserModel():
                 try:
                     self.slifox_driver.driver.get(link_url)
                     break
-                except TimeoutException as tex:
-                    logging.info("TimeoutException while navigating within site")
+                except Exception as ex:
+                    logging.error("Exception while navigating within site: " + str(ex))
 
     def navigate_to_random_site(self):
             logging.info("Navigating to random site ... ")
@@ -118,8 +118,8 @@ class UserModel():
                         self.slifox_driver.driver.get(new_site)
                         self.save_cookies()
                         break
-                    except TimeoutException as tex:
-                        logging.info("TimeoutException while trying to navigate to" + str(new_site))
+                    except Exception as ex:
+                        logging.error("Exception while trying to navigate to" + str(new_site) + ": " + str(ex))
 
 
     def navigate_to_site(self, url):
@@ -128,8 +128,8 @@ class UserModel():
         try:
             self.slifox_driver.driver.get(url)
             self.save_cookies()
-        except TimeoutException as tex:
-            logging.error("TimeoutException: " + tex)
+        except Exception as ex:
+            logging.error("Exception while trying to navigate to" + str(url) + ": " + str(ex))
 
     def navigate_to_history(self):
         self.slifox_driver.driver.execute_script("window.history.go(-1)")
