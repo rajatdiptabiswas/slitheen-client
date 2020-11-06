@@ -148,7 +148,7 @@ class UserModel():
             windows = self.slifox_driver.driver.window_handles
             self.slifox_driver.driver.switch_to.window(windows[-1])
 
-        except Excetion as e:
+        except Exception as e:
             logging.error(e)
 
         
