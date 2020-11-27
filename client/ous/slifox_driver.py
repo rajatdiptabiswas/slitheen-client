@@ -19,11 +19,13 @@ from urllib.parse import urlparse
 import sys
 import getopt
 
+import yt_parser as ytp
+
 # Logging`
 LOGFILE = "slifox_driver.log"
 
 # Overt sites list
-TEST_SITES = ["https://www.python.org", "https://www.youtube.com/", "https://www.instagram.com/beyonce/", "https://www.instagram.com/taylorswift", "https://www.instagram.com/explore/tags/cats/", "https://www.youtube.com/channel/UC4R8DWoMoI7CAwX8_LjQHig", "https://imgur.com/", "https://www.instagram.com/explore/tags/catsofinstagram/", "https://www.instagram.com/explore/tags/ilovecats/", "https://www.instagram.com/selenagomez/", "https://www.instagram.com/badgalriri", "https://www.instagram.com/arianagrande", "https://www.instagram.com/explore/tags/ootd/", "https://www.instagram.com/explore/tags/food/"]
+TEST_SITES = ["https://www.youtube.com/","https://www.reddit.com","https://www.exclaim.com", "https://www.bbc.com" ]
 
 OVERT_SITES = ["https://b.slitheen.net/r/cats/", "https://b.slitheen.net/r/SupermodelCats/", "https://b.slitheen.net/r/cutecats/", "https://a.slitheen.net", "https://c.slitheen.net"]
 
@@ -110,7 +112,7 @@ class UserModel():
             logging.info("Navigating to random site ... ")
              
             while True:
-                new_site = random.choice(OVERT_SITES)
+                new_site = random.choice(TEST_SITES)
                 current_domain = self.get_domain(self.slifox_driver.driver.current_url)
                 if new_site not in current_domain:
                     try:
@@ -205,52 +207,19 @@ class VideoUser(UserModel):
     '''
 
     def start(self):
-        self.navigate_to_site("https://www.youtube.com/watch?v=zudkSqxBq8s") # TODO remove this hard coded
-	# Turn off Autoplay
-        self.slifox_driver.driver.find_element_by_xpath("//div[@id='toggleButton']").click()
-        logging.info("Disabled Autoplay")
+        self.navigate_to_site("https://www.youtube.com")
+#        self.dwell()
+        
+        # Navigate to first video
+        self.navigate_to_site(self.slifox_driver.ytp.home_page_select())
+        self.slifox_driver.ytp.disable_autoplay()
+        #self.slifox_driver.ytp.click_play()  
+
         while True:
-            self.detect_end_mode()
+            self.slifox_driver.ytp.click_play()
+            self.slifox_driver.ytp.detect_video_ended()
             self.dwell()
-            self.start_new_video()
-
-    def start_new_video(self):
-        logging.info("Starting new video")
-        links = self.slifox_driver.driver.find_elements_by_xpath("//a[@href]")
-        video_links = []
-        for link in links:
-            href = link.get_attribute("href")
-            if 'watch?v=' in href:
-                video_links.append(href)
-        url = numpy.random.choice(video_links)
-
-        self.navigate_to_site(url)
-
-    def detect_end_mode(self):
-        script = """ var done = arguments[0];
-                     
-                     var observer = new MutationObserver(classChangedCallback);
-                     observer.observe(document.getElementById('movie_player'), {
-                        attributes: true,
-                        attributeFilter: ['class'],
-                    });
-
-                    function classChangedCallback(mutations, observer) {
-                        console.log("ugh");
-                        var newIndex = mutations[0].target.className;
-                        console.log(newIndex.indexOf('ended-mode'));
-                        if ((newIndex.indexOf('ended-mode') != -1) && (newIndex.indexOf('ad-showing') == -1)) {
-                            console.log('video ended');
-                            observer.disconnect();
-                            done("foo")
-                    }
-                }"""
-        ret = self.slifox_driver.driver.execute_async_script(script)
-        logging.info("FINISHED JS EXECUTION")
-        print(ret)
-        logging.info("Detected that video finished")
-        print('video ended')
-
+            self.navigate_to_site(self.slifox_driver.ytp.secondary_recommendations_select())
 
 class SliFoxDriver(object):
         def __init__(self):
@@ -276,6 +245,9 @@ class SliFoxDriver(object):
             # Set page and script timeouts
             self.driver.set_page_load_timeout(30)
             self.driver.set_script_timeout(50000000)
+
+            # Set up Youtube Parser
+            self.ytp = ytp.YoutubeParser(self.driver)
             
             logging.info("Slifox Driver started")
 
