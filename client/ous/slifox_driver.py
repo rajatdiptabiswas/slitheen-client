@@ -174,14 +174,14 @@ class UserModel():
 
 class BasicModel(UserModel):
     '''
-    This user model loads the same site every second.
+    This user model loads the same site every 10 seconds.
     '''
 
     def start(self):
         logging.info("Starting basic mode ... ")
         while True:
-           self.navigate_to_site("https://www.google.com") # AL - Can be changed
-           time.sleep(1)
+           self.navigate_to_site("https://www.google.com/search?site=&tbm=isch&q=cats") # AL - Can be changed
+           time.sleep(10)
 	
 class BackgroundVideoUser(UserModel):
     '''
