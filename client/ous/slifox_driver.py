@@ -25,7 +25,7 @@ import yt_parser as ytp
 LOGFILE = "slifox_driver.log"
 
 # Overt sites list
-TEST_SITES = ["https://www.youtube.com/","https://www.reddit.com","https://www.exclaim.com", "https://www.bbc.com" ]
+TEST_SITES = ["https://www.reddit.com","https://www.cbc.ca", "https://www.canadaland.com"]
 
 OVERT_SITES = ["https://b.slitheen.net/r/cats/", "https://b.slitheen.net/r/SupermodelCats/", "https://b.slitheen.net/r/cutecats/", "https://a.slitheen.net", "https://c.slitheen.net"]
 
@@ -47,6 +47,7 @@ class UserModel():
         self.slifox_driver = SliFoxDriver()
     
     def start(self):
+        self.navigate_to_random_site()
         while True:
             self.action()
             self.dwell()
